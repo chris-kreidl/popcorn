@@ -232,9 +232,7 @@ pub const Parser = struct {
         // Check for assignment: identifier = expr;
         if (self.current.kind == .identifier) {
             const name = self.current.lexeme;
-            // Peek ahead by saving state
-            const saved_pos = self.lexer.pos;
-            const saved_line = self.lexer.line;
+            const saved = self.lexer.saveState();
             const saved_current = self.current;
             self.advance();
             if (self.current.kind == .assign) {
@@ -246,8 +244,7 @@ pub const Parser = struct {
                 return stmt;
             }
             // Not an assignment, restore and parse as expression
-            self.lexer.pos = saved_pos;
-            self.lexer.line = saved_line;
+            self.lexer.restoreState(saved);
             self.current = saved_current;
         }
 
@@ -359,9 +356,7 @@ pub const Parser = struct {
     fn parseCall(self: *Parser) ParseError!*Expr {
         if (self.current.kind == .identifier) {
             const name = self.current.lexeme;
-            // Save state to check for call
-            const saved_pos = self.lexer.pos;
-            const saved_line = self.lexer.line;
+            const saved = self.lexer.saveState();
             const saved_current = self.current;
             self.advance();
             if (self.current.kind == .lparen) {
@@ -383,8 +378,7 @@ pub const Parser = struct {
                 return expr;
             }
             // Not a call, restore
-            self.lexer.pos = saved_pos;
-            self.lexer.line = saved_line;
+            self.lexer.restoreState(saved);
             self.current = saved_current;
         }
         return self.parsePrimary();

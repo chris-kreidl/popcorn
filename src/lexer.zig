@@ -8,6 +8,20 @@ pub const Lexer = struct {
     pos: usize,
     line: usize,
 
+    pub const State = struct {
+        pos: usize,
+        line: usize,
+    };
+
+    pub fn saveState(self: *const Lexer) State {
+        return .{ .pos = self.pos, .line = self.line };
+    }
+
+    pub fn restoreState(self: *Lexer, state: State) void {
+        self.pos = state.pos;
+        self.line = state.line;
+    }
+
     pub fn init(source: []const u8) Lexer {
         return .{
             .source = source,
