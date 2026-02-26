@@ -190,6 +190,13 @@ pub const Resolver = struct {
         fn_decl.resolved_slot = try self.declareInCurrentScope(fn_decl.name);
 
         try self.beginScope();
+        var scope_popped = false;
+        defer {
+            if (!scope_popped) {
+                _ = self.endScope();
+            }
+        }
+
         for (fn_decl.params) |*param| {
             param.resolved_slot = (try self.declareInCurrentScope(param.name)).?;
         }
@@ -199,5 +206,6 @@ pub const Resolver = struct {
         }
 
         fn_decl.local_slot_count = self.endScope();
+        scope_popped = true;
     }
 };
