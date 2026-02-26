@@ -104,12 +104,13 @@ pub const Environment = struct {
         return error.UndefinedVariable;
     }
 
-    fn ancestor(self: *Environment, depth: u16) ?*Environment {
-        var env: ?*Environment = self;
+    // Walks up the environment chain by `depth` levels. The resolver guarantees
+    // depth is valid; an incorrect depth indicates a compiler bug.
+    fn ancestor(self: *Environment, depth: u16) *Environment {
+        var env: *Environment = self;
         var i: u16 = 0;
         while (i < depth) : (i += 1) {
-            env = env.?.parent;
-            if (env == null) return null;
+            env = env.parent orelse unreachable;
         }
         return env;
     }
@@ -139,7 +140,7 @@ pub const Environment = struct {
     }
 
     pub fn getResolved(self: *Environment, resolved: ResolvedSlot) ?Value {
-        const env = self.ancestor(resolved.depth) orelse return null;
+        const env = self.ancestor(resolved.depth);
         const slot_index: usize = @intCast(resolved.slot);
         if (slot_index >= env.slots.items.len) return null;
         const slot = env.slots.items[slot_index];
@@ -148,7 +149,7 @@ pub const Environment = struct {
     }
 
     pub fn setResolved(self: *Environment, resolved: ResolvedSlot, value: Value) !void {
-        const env = self.ancestor(resolved.depth) orelse return error.UndefinedVariable;
+        const env = self.ancestor(resolved.depth);
         const slot_index: usize = @intCast(resolved.slot);
         if (slot_index >= env.slots.items.len) return error.UndefinedVariable;
 
