@@ -22,42 +22,42 @@ pub fn main() !void {
     }
 }
 
-fn writeAll(file: File, bytes: []const u8) void {
-    _ = std.posix.write(file.handle, bytes) catch {};
+fn writeAll(file: File, bytes: []const u8) !void {
+    try file.writeAll(bytes);
 }
 
-fn printFmt(allocator: std.mem.Allocator, file: File, comptime fmt: []const u8, args: anytype) void {
-    const msg = std.fmt.allocPrint(allocator, fmt, args) catch return;
+fn printFmt(allocator: std.mem.Allocator, file: File, comptime fmt: []const u8, args: anytype) !void {
+    const msg = try std.fmt.allocPrint(allocator, fmt, args);
     defer allocator.free(msg);
-    writeAll(file, msg);
+    try writeAll(file, msg);
 }
 
 fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| {
-        printFmt(allocator, File.stderr(), "Error: Could not read file '{s}': {}\n", .{ path, err });
+        printFmt(allocator, File.stderr(), "Error: Could not read file '{s}': {}\n", .{ path, err }) catch {};
         std.process.exit(1);
     };
     defer allocator.free(source);
 
     var interp = try Interpreter.init(allocator);
-    run(allocator, source, &interp, false);
+    try run(allocator, source, &interp, false);
 }
 
 fn runRepl(allocator: std.mem.Allocator) !void {
     const stdout = File.stdout();
     const stdin = File.stdin().deprecatedReader();
 
-    writeAll(stdout, "Popcorn v0.1.0\n");
-    writeAll(stdout, "Type expressions or statements. Ctrl+D to exit.\n");
+    try writeAll(stdout, "Popcorn v0.1.0\n");
+    try writeAll(stdout, "Type expressions or statements. Ctrl+D to exit.\n");
 
     var interp = try Interpreter.init(allocator);
 
     while (true) {
-        writeAll(stdout, ">> ");
+        try writeAll(stdout, ">> ");
         // Don't free the line - AST nodes reference slices into the source
         const line = stdin.readUntilDelimiterAlloc(allocator, '\n', 4096) catch |err| {
             if (err == error.EndOfStream) {
-                writeAll(stdout, "\nBye!\n");
+                try writeAll(stdout, "\nBye!\n");
                 break;
             }
             return err;
@@ -65,11 +65,11 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
         if (line.len == 0) continue;
 
-        run(allocator, line, &interp, true);
+        try run(allocator, line, &interp, true);
     }
 }
 
-fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) void {
+fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) !void {
     const stderr = File.stderr();
     const stdout = File.stdout();
 
@@ -77,7 +77,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
     const stmts = parser.parse() catch {
         const line = parser.current.line;
         const msg = parser.error_msg orelse "Unknown error";
-        printFmt(allocator, stderr, "[line {d}] Error: {s}\n", .{ line, msg });
+        try printFmt(allocator, stderr, "[line {d}] Error: {s}\n", .{ line, msg });
         return;
     };
 
@@ -92,13 +92,13 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             error.RuntimeError => "Runtime error",
             error.ReturnSignal => "Return outside of function",
         };
-        printFmt(allocator, stderr, "Error: {s}\n", .{msg});
+        try printFmt(allocator, stderr, "Error: {s}\n", .{msg});
         return;
     };
 
     // Flush interpreter output
     if (interp.output.items.len > 0) {
-        writeAll(stdout, interp.output.items);
+        try writeAll(stdout, interp.output.items);
         interp.output.clearRetainingCapacity();
     }
 
@@ -109,8 +109,8 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
                 .null_val => {},
                 else => {
                     const str = val.toString(allocator);
-                    writeAll(stdout, str);
-                    writeAll(stdout, "\n");
+                    try writeAll(stdout, str);
+                    try writeAll(stdout, "\n");
                 },
             }
         }
