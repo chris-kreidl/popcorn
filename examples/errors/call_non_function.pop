@@ -1,0 +1,3 @@
+// Expected error: Type error
+var x: int = 5;
+x(1, 2);

@@ -1,0 +1,2 @@
+// Expected error: Division by zero
+var x: int = 10 / 0;

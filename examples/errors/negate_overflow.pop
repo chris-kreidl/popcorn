@@ -1,0 +1,4 @@
+// Expected error: Runtime error
+// -9223372036854775808 has no positive i64 counterpart
+var x: int = -9223372036854775807 - 1;
+print(-x);
