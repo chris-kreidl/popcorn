@@ -220,7 +220,7 @@ pub const Interpreter = struct {
         const operand = try self.evalExpr(u.operand, env);
         return switch (u.operator) {
             .minus => switch (operand) {
-                .int => |v| Value{ .int = std.math.negate(v) catch return error.RuntimeError },
+                .int => |v| Value{ .int = std.math.negate(v) catch return error.IntegerOverflow },
                 .float => |v| Value{ .float = -v },
                 else => error.TypeError,
             },
@@ -279,7 +279,7 @@ pub const Interpreter = struct {
             .sub => @subWithOverflow(a, b),
             .mul => @mulWithOverflow(a, b),
         };
-        if (result[1] != 0) return error.RuntimeError;
+        if (result[1] != 0) return error.IntegerOverflow;
         return Value{ .int = result[0] };
     }
 
@@ -386,6 +386,7 @@ pub const Interpreter = struct {
         UndefinedVariable,
         ConstAssignment,
         DivisionByZero,
+        IntegerOverflow,
         ArityMismatch,
         ReturnSignal,
     };

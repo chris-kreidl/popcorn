@@ -87,6 +87,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             error.UndefinedVariable => "Undefined variable",
             error.ConstAssignment => "Cannot assign to const variable",
             error.DivisionByZero => "Division by zero",
+            error.IntegerOverflow => "Integer overflow",
             error.ArityMismatch => "Wrong number of arguments",
             error.RuntimeError => "Runtime error",
             error.ReturnSignal => "Return outside of function",
