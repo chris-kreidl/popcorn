@@ -58,8 +58,11 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
     while (true) {
         try writeAll(stdout, ">> ");
-        // Don't free the line - AST nodes reference slices into the source
-        const line = stdin.readUntilDelimiterAlloc(allocator, '\n', 4096) catch |err| {
+        var line_arena = std.heap.ArenaAllocator.init(allocator);
+        defer line_arena.deinit();
+        const line_allocator = line_arena.allocator();
+
+        const line = stdin.readUntilDelimiterAlloc(line_allocator, '\n', 4096) catch |err| {
             if (err == error.EndOfStream) {
                 try writeAll(stdout, "\nBye!\n");
                 break;

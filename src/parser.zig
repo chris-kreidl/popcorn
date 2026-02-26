@@ -53,18 +53,21 @@ pub const Parser = struct {
         const is_const = self.current.kind == .kw_const;
         self.advance(); // consume var/const
 
-        const name = self.current.lexeme;
-        try self.expect(.identifier, "Expected variable name");
+        if (self.current.kind != .identifier) {
+            return self.reportError("Expected variable name");
+        }
+        const name = try self.cloneSlice(self.current.lexeme);
+        self.advance();
 
         var type_name: ?[]const u8 = null;
         if (self.current.kind == .colon) {
             self.advance();
-            type_name = self.current.lexeme;
             if (self.current.kind != .kw_int and self.current.kind != .kw_float and
                 self.current.kind != .kw_string and self.current.kind != .kw_bool)
             {
                 return self.reportError("Expected type name");
             }
+            type_name = try self.cloneSlice(self.current.lexeme);
             self.advance();
         }
 
@@ -85,8 +88,11 @@ pub const Parser = struct {
     fn parseFnDecl(self: *Parser) ParseError!*Stmt {
         self.advance(); // consume 'fn'
 
-        const name = self.current.lexeme;
-        try self.expect(.identifier, "Expected function name");
+        if (self.current.kind != .identifier) {
+            return self.reportError("Expected function name");
+        }
+        const name = try self.cloneSlice(self.current.lexeme);
+        self.advance();
         try self.expect(.lparen, "Expected '(' after function name");
 
         var params: std.ArrayList(Stmt.Param) = .empty;
@@ -95,14 +101,15 @@ pub const Parser = struct {
                 const param_name = self.current.lexeme;
                 try self.expect(.identifier, "Expected parameter name");
                 try self.expect(.colon, "Expected ':' after parameter name");
-                const type_name = self.current.lexeme;
                 if (self.current.kind != .kw_int and self.current.kind != .kw_float and
                     self.current.kind != .kw_string and self.current.kind != .kw_bool)
                 {
                     return self.reportError("Expected type name");
                 }
+                const param_name_copy = try self.cloneSlice(param_name);
+                const type_name_copy = try self.cloneSlice(self.current.lexeme);
                 self.advance();
-                try params.append(self.allocator, .{ .name = param_name, .type_name = type_name });
+                try params.append(self.allocator, .{ .name = param_name_copy, .type_name = type_name_copy });
                 if (self.current.kind != .comma) break;
                 self.advance();
             }
@@ -112,12 +119,12 @@ pub const Parser = struct {
         var return_type: ?[]const u8 = null;
         if (self.current.kind == .colon) {
             self.advance();
-            return_type = self.current.lexeme;
             if (self.current.kind != .kw_int and self.current.kind != .kw_float and
                 self.current.kind != .kw_string and self.current.kind != .kw_bool)
             {
                 return self.reportError("Expected return type");
             }
+            return_type = try self.cloneSlice(self.current.lexeme);
             self.advance();
         }
 
@@ -239,8 +246,9 @@ pub const Parser = struct {
                 self.advance(); // consume '='
                 const value = try self.parseExpression();
                 try self.expect(.semicolon, "Expected ';' after assignment");
+                const name_copy = try self.cloneSlice(name);
                 const stmt = try self.allocator.create(Stmt);
-                stmt.* = .{ .assignment = .{ .name = name, .value = value } };
+                stmt.* = .{ .assignment = .{ .name = name_copy, .value = value } };
                 return stmt;
             }
             // Not an assignment, restore and parse as expression
@@ -370,9 +378,10 @@ pub const Parser = struct {
                     }
                 }
                 try self.expect(.rparen, "Expected ')' after arguments");
+                const name_copy = try self.cloneSlice(name);
                 const expr = try self.allocator.create(Expr);
                 expr.* = .{ .call = .{
-                    .callee = name,
+                    .callee = name_copy,
                     .args = try args.toOwnedSlice(self.allocator),
                 } };
                 return expr;
@@ -402,8 +411,9 @@ pub const Parser = struct {
             },
             .string => {
                 const lexeme = self.current.lexeme;
+                const string_copy = try self.cloneSlice(lexeme[1 .. lexeme.len - 1]);
                 const expr = try self.allocator.create(Expr);
-                expr.* = .{ .string_literal = lexeme[1 .. lexeme.len - 1] };
+                expr.* = .{ .string_literal = string_copy };
                 self.advance();
                 return expr;
             },
@@ -426,8 +436,9 @@ pub const Parser = struct {
                 return expr;
             },
             .identifier => {
+                const name_copy = try self.cloneSlice(self.current.lexeme);
                 const expr = try self.allocator.create(Expr);
-                expr.* = .{ .identifier = self.current.lexeme };
+                expr.* = .{ .identifier = name_copy };
                 self.advance();
                 return expr;
             },
@@ -460,5 +471,9 @@ pub const Parser = struct {
             self.error_msg = msg;
         }
         return error.ParseError;
+    }
+
+    fn cloneSlice(self: *Parser, slice: []const u8) ParseError![]const u8 {
+        return try self.allocator.dupe(u8, slice);
     }
 };
