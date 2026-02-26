@@ -28,6 +28,9 @@ pub const Resolver = struct {
     }
 
     pub fn resolve(self: *Resolver, stmts: []const *Stmt) !void {
+        try self.beginScope();
+        defer self.endScope();
+
         for (stmts) |stmt| {
             try self.resolveStmt(stmt);
         }
