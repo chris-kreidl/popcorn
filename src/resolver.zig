@@ -50,6 +50,10 @@ pub const Resolver = struct {
     }
 
     fn beginScope(self: *Resolver) ResolveError!void {
+        if (self.scopes.items.len > self.max_scope_depth) {
+            return error.ScopeNestingTooDeep;
+        }
+
         const scope = Scope{
             .slots = std.StringHashMap(u16).init(self.allocator),
             .next_slot = 0,
