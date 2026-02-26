@@ -51,6 +51,7 @@ pub const Value = union(enum) {
 
 const OpCode = enum(u8) {
     push_const,
+    dup,
     pop,
 
     load_global,
@@ -60,6 +61,8 @@ const OpCode = enum(u8) {
     load_local,
     define_local,
     set_local,
+    load_frame_local,
+    set_frame_local,
     enter_scope,
     exit_scope,
 
@@ -157,6 +160,7 @@ pub const Function = struct {
 pub const Compiler = struct {
     allocator: std.mem.Allocator,
     global_names: std.StringHashMap(void),
+    function_global_refs: std.StringHashMap(void),
     in_script: bool,
     lexical_depth: usize,
     runtime_scope_stack: std.ArrayList(bool),
@@ -165,6 +169,7 @@ pub const Compiler = struct {
         return .{
             .allocator = allocator,
             .global_names = std.StringHashMap(void).init(allocator),
+            .function_global_refs = std.StringHashMap(void).init(allocator),
             .in_script = false,
             .lexical_depth = 0,
             .runtime_scope_stack = .empty,
@@ -179,12 +184,13 @@ pub const Compiler = struct {
                 else => {},
             }
         }
+        try self.collectFunctionGlobalRefs(stmts);
 
         const fn_obj = try self.allocator.create(Function);
         fn_obj.* = .{
             .name = "<script>",
             .arity = 0,
-            .local_slot_count = 0,
+            .local_slot_count = Compiler.scopeSlotCount(stmts),
             .param_slots = &.{},
             .chunk = Chunk.init(),
         };
@@ -237,7 +243,6 @@ pub const Compiler = struct {
             },
             .if_stmt => |if_stmt| {
                 try self.compileExpr(func, if_stmt.condition);
-                try func.chunk.emitOp(self.allocator, .truthy);
                 const jfalse_pos = try func.chunk.emitJumpPlaceholder(self.allocator, .jump_if_false);
                 try func.chunk.emitOp(self.allocator, .pop);
 
@@ -282,7 +287,6 @@ pub const Compiler = struct {
             .while_stmt => |while_stmt| {
                 const loop_start: u32 = @intCast(func.chunk.code.items.len);
                 try self.compileExpr(func, while_stmt.condition);
-                try func.chunk.emitOp(self.allocator, .truthy);
                 const jexit_pos = try func.chunk.emitJumpPlaceholder(self.allocator, .jump_if_false);
                 try func.chunk.emitOp(self.allocator, .pop);
 
@@ -400,21 +404,17 @@ pub const Compiler = struct {
                 switch (b.operator) {
                     .amp_amp => {
                         try self.compileExpr(func, b.left);
-                        try func.chunk.emitOp(self.allocator, .truthy);
                         const jfalse_pos = try func.chunk.emitJumpPlaceholder(self.allocator, .jump_if_false);
                         try func.chunk.emitOp(self.allocator, .pop);
                         try self.compileExpr(func, b.right);
-                        try func.chunk.emitOp(self.allocator, .truthy);
                         const end: u32 = @intCast(func.chunk.code.items.len);
                         func.chunk.patchU32At(jfalse_pos, end);
                     },
                     .pipe_pipe => {
                         try self.compileExpr(func, b.left);
-                        try func.chunk.emitOp(self.allocator, .truthy);
                         const jtrue_pos = try func.chunk.emitJumpPlaceholder(self.allocator, .jump_if_true);
                         try func.chunk.emitOp(self.allocator, .pop);
                         try self.compileExpr(func, b.right);
-                        try func.chunk.emitOp(self.allocator, .truthy);
                         const end: u32 = @intCast(func.chunk.code.items.len);
                         func.chunk.patchU32At(jtrue_pos, end);
                     },
@@ -452,9 +452,14 @@ pub const Compiler = struct {
         switch (try self.classifyBinding(name, resolved)) {
             .local => |r| {
                 const runtime_depth = try self.runtimeDepthForResolved(r);
-                try func.chunk.emitOp(self.allocator, .load_local);
-                try func.chunk.emitU16(self.allocator, runtime_depth);
-                try func.chunk.emitU16(self.allocator, r.slot);
+                if (runtime_depth == 0) {
+                    try func.chunk.emitOp(self.allocator, .load_frame_local);
+                    try func.chunk.emitU16(self.allocator, r.slot);
+                } else {
+                    try func.chunk.emitOp(self.allocator, .load_local);
+                    try func.chunk.emitU16(self.allocator, runtime_depth);
+                    try func.chunk.emitU16(self.allocator, r.slot);
+                }
             },
             .global => {
                 const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
@@ -466,16 +471,24 @@ pub const Compiler = struct {
 
     fn emitDefineBinding(self: *Compiler, func: *Function, name: []const u8, resolved_slot: ?u16, is_const: bool) CompileError!void {
         if (resolved_slot) |slot| {
-            if (self.in_script and self.lexical_depth == 0) {
-                const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
-                try func.chunk.emitOp(self.allocator, .define_global);
-                _ = try func.chunk.emitU32(self.allocator, idx);
-                try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
-                return;
+            const should_export_global = self.in_script and
+                self.lexical_depth == 0 and
+                self.function_global_refs.contains(name);
+            if (should_export_global) {
+                // Keep script-level vars/functions fast as slots, but also publish
+                // them to globals for function bodies (no closures yet).
+                try func.chunk.emitOp(self.allocator, .dup);
             }
             try func.chunk.emitOp(self.allocator, .define_local);
             try func.chunk.emitU16(self.allocator, slot);
             try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
+
+            if (should_export_global) {
+                const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                try func.chunk.emitOp(self.allocator, .define_global);
+                _ = try func.chunk.emitU32(self.allocator, idx);
+                try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
+            }
         } else {
             const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
             try func.chunk.emitOp(self.allocator, .define_global);
@@ -487,10 +500,27 @@ pub const Compiler = struct {
     fn emitSetBinding(self: *Compiler, func: *Function, name: []const u8, resolved: ?ResolvedSlot) CompileError!void {
         switch (try self.classifyBinding(name, resolved)) {
             .local => |r| {
+                const current_depth: u16 = @intCast(self.lexical_depth);
+                const should_export_global = self.in_script and
+                    r.depth == current_depth and
+                    self.function_global_refs.contains(name);
+                if (should_export_global) {
+                    try func.chunk.emitOp(self.allocator, .dup);
+                }
                 const runtime_depth = try self.runtimeDepthForResolved(r);
-                try func.chunk.emitOp(self.allocator, .set_local);
-                try func.chunk.emitU16(self.allocator, runtime_depth);
-                try func.chunk.emitU16(self.allocator, r.slot);
+                if (runtime_depth == 0) {
+                    try func.chunk.emitOp(self.allocator, .set_frame_local);
+                    try func.chunk.emitU16(self.allocator, r.slot);
+                } else {
+                    try func.chunk.emitOp(self.allocator, .set_local);
+                    try func.chunk.emitU16(self.allocator, runtime_depth);
+                    try func.chunk.emitU16(self.allocator, r.slot);
+                }
+                if (should_export_global) {
+                    const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                    try func.chunk.emitOp(self.allocator, .set_global);
+                    _ = try func.chunk.emitU32(self.allocator, idx);
+                }
             },
             .global => {
                 const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
@@ -509,8 +539,8 @@ pub const Compiler = struct {
         if (resolved) |r| {
             const current_depth: u16 = @intCast(self.lexical_depth);
             if (self.in_script) {
-                if (r.depth == current_depth) return .global;
-                return .{ .local = r };
+                if (r.depth <= current_depth) return .{ .local = r };
+                return error.UnsupportedFeature;
             }
 
             if (r.depth <= current_depth) return .{ .local = r };
@@ -573,6 +603,104 @@ pub const Compiler = struct {
         if (runtime_depth > std.math.maxInt(u16)) return error.UnsupportedFeature;
         return @intCast(runtime_depth);
     }
+
+    fn isFunctionGlobalRef(self: *Compiler, function_depth: u16, resolved: ResolvedSlot, name: []const u8) bool {
+        return resolved.depth == function_depth + 1 and self.global_names.contains(name);
+    }
+
+    fn collectFunctionGlobalRefs(self: *Compiler, stmts: []*Stmt) CompileError!void {
+        for (stmts) |stmt| {
+            try self.collectGlobalRefsInStmt(stmt, false, 0);
+        }
+    }
+
+    fn collectGlobalRefsInStmt(self: *Compiler, stmt: *Stmt, in_function: bool, function_depth: u16) CompileError!void {
+        switch (stmt.*) {
+            .expr_stmt => |expr| try self.collectGlobalRefsInExpr(expr, in_function, function_depth),
+            .print_stmt => |expr| try self.collectGlobalRefsInExpr(expr, in_function, function_depth),
+            .var_decl => |decl| try self.collectGlobalRefsInExpr(decl.initializer, in_function, function_depth),
+            .assignment => |assign| {
+                try self.collectGlobalRefsInExpr(assign.value, in_function, function_depth);
+                if (in_function) {
+                    if (assign.resolved) |resolved| {
+                        if (self.isFunctionGlobalRef(function_depth, resolved, assign.name)) {
+                            try self.function_global_refs.put(assign.name, {});
+                        }
+                    }
+                }
+            },
+            .block => |stmts| {
+                for (stmts) |child| {
+                    try self.collectGlobalRefsInStmt(child, in_function, function_depth + 1);
+                }
+            },
+            .if_stmt => |if_stmt| {
+                try self.collectGlobalRefsInExpr(if_stmt.condition, in_function, function_depth);
+                for (if_stmt.then_branch) |child| {
+                    try self.collectGlobalRefsInStmt(child, in_function, function_depth + 1);
+                }
+                if (if_stmt.else_branch) |else_branch| {
+                    for (else_branch) |child| {
+                        try self.collectGlobalRefsInStmt(child, in_function, function_depth + 1);
+                    }
+                }
+            },
+            .while_stmt => |while_stmt| {
+                try self.collectGlobalRefsInExpr(while_stmt.condition, in_function, function_depth);
+                for (while_stmt.body) |child| {
+                    try self.collectGlobalRefsInStmt(child, in_function, function_depth + 1);
+                }
+            },
+            .fn_decl => |fn_decl| {
+                for (fn_decl.body) |child| {
+                    try self.collectGlobalRefsInStmt(child, true, 0);
+                }
+            },
+            .return_stmt => |ret| {
+                if (ret.value) |value| {
+                    try self.collectGlobalRefsInExpr(value, in_function, function_depth);
+                }
+            },
+        }
+    }
+
+    fn collectGlobalRefsInExpr(self: *Compiler, expr: *Expr, in_function: bool, function_depth: u16) CompileError!void {
+        switch (expr.*) {
+            .integer_literal,
+            .float_literal,
+            .string_literal,
+            .bool_literal,
+            .null_literal,
+            => {},
+            .identifier => |identifier| {
+                if (in_function) {
+                    if (identifier.resolved) |resolved| {
+                        if (self.isFunctionGlobalRef(function_depth, resolved, identifier.name)) {
+                            try self.function_global_refs.put(identifier.name, {});
+                        }
+                    }
+                }
+            },
+            .grouping => |inner| try self.collectGlobalRefsInExpr(inner, in_function, function_depth),
+            .unary => |unary| try self.collectGlobalRefsInExpr(unary.operand, in_function, function_depth),
+            .binary => |binary| {
+                try self.collectGlobalRefsInExpr(binary.left, in_function, function_depth);
+                try self.collectGlobalRefsInExpr(binary.right, in_function, function_depth);
+            },
+            .call => |call| {
+                if (in_function) {
+                    if (call.callee_resolved) |resolved| {
+                        if (self.isFunctionGlobalRef(function_depth, resolved, call.callee)) {
+                            try self.function_global_refs.put(call.callee, {});
+                        }
+                    }
+                }
+                for (call.args) |arg| {
+                    try self.collectGlobalRefsInExpr(arg, in_function, function_depth);
+                }
+            },
+        }
+    }
 };
 
 const GlobalEntry = struct {
@@ -593,15 +721,19 @@ const Frame = struct {
     locals_base: usize,
 };
 
+const LocalSlot = struct {
+    value: Value,
+    is_set: bool,
+    is_const: bool,
+};
+
 pub const Vm = struct {
     allocator: std.mem.Allocator,
     globals: std.StringHashMap(GlobalEntry),
     stack: std.ArrayList(Value),
     frames: std.ArrayList(Frame),
     scope_stack: std.ArrayList(ScopeState),
-    local_values: std.ArrayList(Value),
-    local_set: std.ArrayList(bool),
-    local_const: std.ArrayList(bool),
+    locals: std.ArrayList(LocalSlot),
     output: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator) Vm {
@@ -611,9 +743,7 @@ pub const Vm = struct {
             .stack = .empty,
             .frames = .empty,
             .scope_stack = .empty,
-            .local_values = .empty,
-            .local_set = .empty,
-            .local_const = .empty,
+            .locals = .empty,
             .output = .empty,
         };
     }
@@ -628,7 +758,7 @@ pub const Vm = struct {
 
     fn pushFrame(self: *Vm, func: *Function, stack_base: usize) RuntimeError!void {
         const scope_base = self.scope_stack.items.len;
-        const locals_base = self.local_values.items.len;
+        const locals_base = self.locals.items.len;
         self.frames.append(self.allocator, .{
             .func = func,
             .ip = 0,
@@ -655,19 +785,12 @@ pub const Vm = struct {
 
     fn pushScope(self: *Vm, slot_count_u16: u16) RuntimeError!void {
         const slot_count: usize = @intCast(slot_count_u16);
-        const base = self.local_values.items.len;
+        const base = self.locals.items.len;
 
-        // Many control-flow scopes contain no declarations; keep those scopes
-        // cheap by avoiding local-array resize/zero-fill work.
         if (slot_count != 0) {
-            self.local_values.resize(self.allocator, base + slot_count) catch return error.RuntimeError;
-            self.local_set.resize(self.allocator, base + slot_count) catch return error.RuntimeError;
-            self.local_const.resize(self.allocator, base + slot_count) catch return error.RuntimeError;
-
+            self.locals.resize(self.allocator, base + slot_count) catch return error.RuntimeError;
             for (base..base + slot_count) |i| {
-                self.local_values.items[i] = .null_val;
-                self.local_set.items[i] = false;
-                self.local_const.items[i] = false;
+                self.locals.items[i] = .{ .value = .null_val, .is_set = false, .is_const = false };
             }
         }
 
@@ -678,9 +801,7 @@ pub const Vm = struct {
         if (self.scope_stack.items.len == fr.scope_base) return error.RuntimeError;
         const scope = self.scope_stack.pop().?;
         if (scope.len != 0) {
-            self.local_values.shrinkRetainingCapacity(scope.base);
-            self.local_set.shrinkRetainingCapacity(scope.base);
-            self.local_const.shrinkRetainingCapacity(scope.base);
+            self.locals.shrinkRetainingCapacity(scope.base);
         }
     }
 
@@ -743,6 +864,11 @@ pub const Vm = struct {
                     const idx = try self.readU32(fr);
                     try self.push(try constAt(fr, idx));
                 },
+                .dup => {
+                    if (self.stack.items.len == 0) return error.RuntimeError;
+                    const v = self.stack.items[self.stack.items.len - 1];
+                    try self.push(v);
+                },
                 .pop => _ = try self.pop(),
 
                 .load_global => {
@@ -792,8 +918,9 @@ pub const Vm = struct {
                     const i: usize = @intCast(slot);
                     if (i >= scope.len) return error.UndefinedVariable;
                     const idx = scope.base + i;
-                    if (!self.local_set.items[idx]) return error.UndefinedVariable;
-                    try self.push(self.local_values.items[idx]);
+                    const local = self.locals.items[idx];
+                    if (!local.is_set) return error.UndefinedVariable;
+                    try self.push(local.value);
                 },
                 .define_local => {
                     const slot = try self.readU16(fr);
@@ -803,9 +930,7 @@ pub const Vm = struct {
                     if (i >= scope.len) return error.RuntimeError;
                     const v = try self.pop();
                     const idx = scope.base + i;
-                    self.local_values.items[idx] = v;
-                    self.local_set.items[idx] = true;
-                    self.local_const.items[idx] = is_const;
+                    self.locals.items[idx] = .{ .value = v, .is_set = true, .is_const = is_const };
                 },
                 .set_local => {
                     const depth = try self.readU16(fr);
@@ -814,10 +939,22 @@ pub const Vm = struct {
                     const i: usize = @intCast(slot);
                     if (i >= scope.len) return error.UndefinedVariable;
                     const idx = scope.base + i;
-                    if (!self.local_set.items[idx]) return error.UndefinedVariable;
-                    if (self.local_const.items[idx]) return error.ConstAssignment;
+                    const local = &self.locals.items[idx];
+                    if (!local.is_set) return error.UndefinedVariable;
+                    if (local.is_const) return error.ConstAssignment;
                     const v = try self.pop();
-                    self.local_values.items[idx] = v;
+                    local.value = v;
+                },
+                .load_frame_local => {
+                    const slot = try self.readU16(fr);
+                    const idx = fr.locals_base + @as(usize, slot);
+                    try self.push(self.locals.items[idx].value);
+                },
+                .set_frame_local => {
+                    const slot = try self.readU16(fr);
+                    const idx = fr.locals_base + @as(usize, slot);
+                    const v = try self.pop();
+                    self.locals.items[idx].value = v;
                 },
 
                 .add => try self.binArithAdd(),
@@ -889,18 +1026,14 @@ pub const Vm = struct {
                         if (slot_i >= root_scope.len) return error.RuntimeError;
                         const idx = root_scope.base + slot_i;
                         const arg_val = self.stack.items[callee_idx + 1 + i];
-                        self.local_values.items[idx] = arg_val;
-                        self.local_set.items[idx] = true;
-                        self.local_const.items[idx] = false;
+                        self.locals.items[idx] = .{ .value = arg_val, .is_set = true, .is_const = false };
                     }
                 },
                 .ret => {
                     const ret_val = try self.pop();
                     const finished = self.frames.pop().?;
                     self.scope_stack.shrinkRetainingCapacity(finished.scope_base);
-                    self.local_values.shrinkRetainingCapacity(finished.locals_base);
-                    self.local_set.shrinkRetainingCapacity(finished.locals_base);
-                    self.local_const.shrinkRetainingCapacity(finished.locals_base);
+                    self.locals.shrinkRetainingCapacity(finished.locals_base);
                     self.stack.shrinkRetainingCapacity(finished.stack_base);
                     if (self.frames.items.len == 0) {
                         return ret_val;

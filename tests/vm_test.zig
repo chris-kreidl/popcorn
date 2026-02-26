@@ -56,6 +56,27 @@ test "vm: global function call and recursion" {
     try std.testing.expectEqualStrings("21\n", vm.output.items);
 }
 
+test "vm: script locals stay fast and remain visible to functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\var x: int = 1;
+        \\fn readX(): int {
+        \\    return x;
+        \\}
+        \\x = 2;
+        \\print(readX());
+    ;
+
+    const stmts = try parseAndResolve(allocator, source);
+    var vm = Vm.init(allocator);
+    _ = try vm.runProgram(stmts);
+    try std.testing.expectEqualStrings("2\n", vm.output.items);
+    try std.testing.expect(vm.globals.contains("x"));
+}
+
 test "vm: closures currently unsupported" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -74,4 +95,27 @@ test "vm: closures currently unsupported" {
     const stmts = try parseAndResolve(allocator, source);
     var vm = Vm.init(allocator);
     try std.testing.expectError(error.UnsupportedFeature, vm.runProgram(stmts));
+}
+
+test "vm: top-level vars are not exported when no function references them" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\var i: int = 0;
+        \\var sum: int = 0;
+        \\while i < 3 {
+        \\    sum = sum + i;
+        \\    i = i + 1;
+        \\}
+        \\print(sum);
+    ;
+
+    const stmts = try parseAndResolve(allocator, source);
+    var vm = Vm.init(allocator);
+    _ = try vm.runProgram(stmts);
+    try std.testing.expectEqualStrings("3\n", vm.output.items);
+    try std.testing.expect(!vm.globals.contains("i"));
+    try std.testing.expect(!vm.globals.contains("sum"));
 }
