@@ -3,6 +3,7 @@ const Parser = @import("parser.zig").Parser;
 const Resolver = @import("resolver.zig").Resolver;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Value = @import("interpreter.zig").Value;
+const Vm = @import("vm.zig").Vm;
 const File = std.fs.File;
 const RunStatus = enum { ok, language_error };
 
@@ -32,6 +33,12 @@ fn printFmt(allocator: std.mem.Allocator, file: File, comptime fmt: []const u8, 
     const msg = try std.fmt.allocPrint(allocator, fmt, args);
     defer allocator.free(msg);
     try writeAll(file, msg);
+}
+
+fn vmEnabled(allocator: std.mem.Allocator) bool {
+    const value = std.process.getEnvVarOwned(allocator, "POPCORN_VM") catch return false;
+    defer allocator.free(value);
+    return value.len > 0 and !std.mem.eql(u8, value, "0");
 }
 
 fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
@@ -105,6 +112,60 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             else => return err,
         }
     };
+
+    if (vmEnabled(allocator)) {
+        var vm = Vm.init(allocator);
+        const vm_result = vm.runProgram(stmts) catch |err| switch (err) {
+            error.UnsupportedFeature => null,
+            error.TypeError => {
+                try printFmt(allocator, stderr, "Error: Type error\n", .{});
+                return .language_error;
+            },
+            error.UndefinedVariable => {
+                try printFmt(allocator, stderr, "Error: Undefined variable\n", .{});
+                return .language_error;
+            },
+            error.ConstAssignment => {
+                try printFmt(allocator, stderr, "Error: Cannot assign to const variable\n", .{});
+                return .language_error;
+            },
+            error.DivisionByZero => {
+                try printFmt(allocator, stderr, "Error: Division by zero\n", .{});
+                return .language_error;
+            },
+            error.IntegerOverflow => {
+                try printFmt(allocator, stderr, "Error: Integer overflow\n", .{});
+                return .language_error;
+            },
+            error.ArityMismatch => {
+                try printFmt(allocator, stderr, "Error: Wrong number of arguments\n", .{});
+                return .language_error;
+            },
+            error.RuntimeError => {
+                try printFmt(allocator, stderr, "Error: Runtime error\n", .{});
+                return .language_error;
+            },
+            else => return err,
+        };
+
+        if (vm_result) |result| {
+            if (vm.output.items.len > 0) {
+                try writeAll(stdout, vm.output.items);
+            }
+
+            if (is_repl) {
+                switch (result) {
+                    .null_val => {},
+                    else => {
+                        const str = result.toString(allocator);
+                        try writeAll(stdout, str);
+                        try writeAll(stdout, "\n");
+                    },
+                }
+            }
+            return .ok;
+        }
+    }
 
     const result = interp.interpret(stmts) catch |err| {
         const msg: []const u8 = switch (err) {
