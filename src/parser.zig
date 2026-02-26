@@ -391,43 +391,48 @@ pub const Parser = struct {
     }
 
     fn parsePrimary(self: *Parser) ParseError!*Expr {
-        const expr = try self.allocator.create(Expr);
         switch (self.current.kind) {
             .integer => {
                 const val = std.fmt.parseInt(i64, self.current.lexeme, 10) catch return self.reportError("Invalid integer");
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .integer_literal = val };
                 self.advance();
                 return expr;
             },
             .float => {
                 const val = std.fmt.parseFloat(f64, self.current.lexeme) catch return self.reportError("Invalid float");
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .float_literal = val };
                 self.advance();
                 return expr;
             },
             .string => {
-                // Strip quotes
                 const lexeme = self.current.lexeme;
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .string_literal = lexeme[1 .. lexeme.len - 1] };
                 self.advance();
                 return expr;
             },
             .kw_true => {
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .bool_literal = true };
                 self.advance();
                 return expr;
             },
             .kw_false => {
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .bool_literal = false };
                 self.advance();
                 return expr;
             },
             .kw_null => {
+                const expr = try self.allocator.create(Expr);
                 expr.* = .null_literal;
                 self.advance();
                 return expr;
             },
             .identifier => {
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .identifier = self.current.lexeme };
                 self.advance();
                 return expr;
@@ -436,6 +441,7 @@ pub const Parser = struct {
                 self.advance();
                 const inner = try self.parseExpression();
                 try self.expect(.rparen, "Expected ')'");
+                const expr = try self.allocator.create(Expr);
                 expr.* = .{ .grouping = inner };
                 return expr;
             },
