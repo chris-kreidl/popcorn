@@ -1,0 +1,10 @@
+// arithmetic_loop.pop
+// Arithmetic-heavy loop without I/O in the hot path.
+
+var i: int = 0;
+var acc: int = 0;
+while i < 2000000 {
+    acc = acc + (i % 7) * 3 - (i % 5);
+    i = i + 1;
+}
+print(acc);

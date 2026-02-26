@@ -1,0 +1,14 @@
+// call_heavy.pop
+// Function-call-heavy benchmark.
+
+fn mix(x: int): int {
+    return (x * 3 + 1) % 97;
+}
+
+var i: int = 0;
+var sum: int = 0;
+while i < 800000 {
+    sum = sum + mix(i);
+    i = i + 1;
+}
+print(sum);
