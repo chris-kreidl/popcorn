@@ -118,6 +118,10 @@ pub const Resolver = struct {
                 try self.resolveExpr(assign.value);
                 assign.resolved = try self.resolveName(assign.name);
             },
+            // Note: .block opens its own scope here, and if_stmt/while_stmt/fn_decl
+            // also open scopes for their bodies. This works because those bodies are
+            // raw []*Stmt, not wrapped in .block nodes. If that representation changes,
+            // avoid double-scoping.
             .block => |stmts| {
                 try self.beginScope();
                 defer _ = self.endScope();
