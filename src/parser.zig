@@ -153,7 +153,7 @@ pub const Parser = struct {
         const then_branch = try self.parseStmtList();
         try self.expect(.rbrace, "Expected '}' after if body");
 
-        var else_branch: ?[]const *Stmt = null;
+        var else_branch: ?[]*Stmt = null;
         if (self.current.kind == .kw_else) {
             self.advance();
             if (self.current.kind == .kw_if) {
@@ -230,7 +230,7 @@ pub const Parser = struct {
         return stmt;
     }
 
-    fn parseStmtList(self: *Parser) ParseError![]const *Stmt {
+    fn parseStmtList(self: *Parser) ParseError![]*Stmt {
         var stmts: std.ArrayList(*Stmt) = .empty;
         while (self.current.kind != .rbrace and self.current.kind != .eof) {
             try stmts.append(self.allocator, try self.parseStatement());

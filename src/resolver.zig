@@ -40,7 +40,7 @@ pub const Resolver = struct {
         self.scopes.deinit(self.allocator);
     }
 
-    pub fn resolve(self: *Resolver, stmts: []const *Stmt) ResolveError!void {
+    pub fn resolve(self: *Resolver, stmts: []*Stmt) ResolveError!void {
         try self.beginScope();
         defer _ = self.endScope();
 
@@ -106,8 +106,7 @@ pub const Resolver = struct {
         return null;
     }
 
-    fn resolveStmt(self: *Resolver, stmt_ptr: *const Stmt) ResolveError!void {
-        const stmt = @constCast(stmt_ptr);
+    fn resolveStmt(self: *Resolver, stmt: *Stmt) ResolveError!void {
         switch (stmt.*) {
             .expr_stmt => |expr| try self.resolveExpr(expr),
             .print_stmt => |expr| try self.resolveExpr(expr),
@@ -159,9 +158,8 @@ pub const Resolver = struct {
         }
     }
 
-    fn resolveExpr(self: *Resolver, expr: *const Expr) ResolveError!void {
-        const node = @constCast(expr);
-        switch (node.*) {
+    fn resolveExpr(self: *Resolver, expr: *Expr) ResolveError!void {
+        switch (expr.*) {
             .integer_literal,
             .float_literal,
             .string_literal,

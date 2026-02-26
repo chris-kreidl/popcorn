@@ -36,7 +36,7 @@ pub const Expr = union(enum) {
     pub const Call = struct {
         callee: []const u8,
         callee_resolved: ?ResolvedSlot = null,
-        args: []const *Expr,
+        args: []*Expr,
     };
 };
 
@@ -45,7 +45,7 @@ pub const Stmt = union(enum) {
     print_stmt: *Expr,
     var_decl: VarDecl,
     assignment: Assignment,
-    block: []const *Stmt,
+    block: []*Stmt,
     if_stmt: IfStmt,
     while_stmt: WhileStmt,
     fn_decl: FnDecl,
@@ -67,20 +67,20 @@ pub const Stmt = union(enum) {
 
     pub const IfStmt = struct {
         condition: *Expr,
-        then_branch: []const *Stmt,
-        else_branch: ?[]const *Stmt,
+        then_branch: []*Stmt,
+        else_branch: ?[]*Stmt,
     };
 
     pub const WhileStmt = struct {
         condition: *Expr,
-        body: []const *Stmt,
+        body: []*Stmt,
     };
 
     pub const FnDecl = struct {
         name: []const u8,
         params: []Param,
         return_type: ?[]const u8,
-        body: []const *Stmt,
+        body: []*Stmt,
         resolved_slot: ?u16 = null,
         local_slot_count: u16 = 0,
     };

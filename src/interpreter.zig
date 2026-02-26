@@ -15,8 +15,8 @@ pub const Value = union(enum) {
 
     pub const Function = struct {
         name: []const u8,
-        params: []const Stmt.Param,
-        body: []const *Stmt,
+        params: []Stmt.Param,
+        body: []*Stmt,
         closure: *Environment,
         local_slot_count: u16,
     };
@@ -174,11 +174,11 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn interpret(self: *Interpreter, stmts: []const *Stmt) !?Value {
+    pub fn interpret(self: *Interpreter, stmts: []*Stmt) !?Value {
         return self.executeStmts(stmts, self.global_env);
     }
 
-    fn executeStmts(self: *Interpreter, stmts: []const *Stmt, env: *Environment) !?Value {
+    fn executeStmts(self: *Interpreter, stmts: []*Stmt, env: *Environment) !?Value {
         var last_value: ?Value = null;
         for (stmts) |stmt| {
             last_value = try self.executeStmt(stmt, env);
@@ -194,7 +194,7 @@ pub const Interpreter = struct {
         }
     }
 
-    fn executeStmt(self: *Interpreter, stmt: *const Stmt, env: *Environment) InterpreterError!?Value {
+    fn executeStmt(self: *Interpreter, stmt: *Stmt, env: *Environment) InterpreterError!?Value {
         switch (stmt.*) {
             .expr_stmt => |expr| {
                 const val = try self.evalExpr(expr, env);
@@ -275,12 +275,12 @@ pub const Interpreter = struct {
         }
     }
 
-    fn executeBlock(self: *Interpreter, stmts: []const *Stmt, parent: *Environment) InterpreterError!?Value {
+    fn executeBlock(self: *Interpreter, stmts: []*Stmt, parent: *Environment) InterpreterError!?Value {
         const block_env = Environment.init(self.allocator, parent) catch return error.RuntimeError;
         return self.executeStmts(stmts, block_env);
     }
 
-    fn evalExpr(self: *Interpreter, expr: *const Expr, env: *Environment) InterpreterError!Value {
+    fn evalExpr(self: *Interpreter, expr: *Expr, env: *Environment) InterpreterError!Value {
         return switch (expr.*) {
             .integer_literal => |v| Value{ .int = v },
             .float_literal => |v| Value{ .float = v },
