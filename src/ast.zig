@@ -1,16 +1,26 @@
 const TokenType = @import("token.zig").TokenType;
 
+pub const ResolvedSlot = struct {
+    depth: u16,
+    slot: u16,
+};
+
 pub const Expr = union(enum) {
     integer_literal: i64,
     float_literal: f64,
     string_literal: []const u8,
     bool_literal: bool,
     null_literal,
-    identifier: []const u8,
+    identifier: Identifier,
     unary: Unary,
     binary: Binary,
     call: Call,
     grouping: *Expr,
+
+    pub const Identifier = struct {
+        name: []const u8,
+        resolved: ?ResolvedSlot = null,
+    };
 
     pub const Unary = struct {
         operator: TokenType,
@@ -25,7 +35,8 @@ pub const Expr = union(enum) {
 
     pub const Call = struct {
         callee: []const u8,
-        args: []const *Expr,
+        callee_resolved: ?ResolvedSlot = null,
+        args: []*Expr,
     };
 };
 
@@ -34,7 +45,7 @@ pub const Stmt = union(enum) {
     print_stmt: *Expr,
     var_decl: VarDecl,
     assignment: Assignment,
-    block: []const *Stmt,
+    block: []*Stmt,
     if_stmt: IfStmt,
     while_stmt: WhileStmt,
     fn_decl: FnDecl,
@@ -45,34 +56,39 @@ pub const Stmt = union(enum) {
         type_name: ?[]const u8,
         initializer: *Expr,
         is_const: bool,
+        resolved_slot: ?u16 = null,
     };
 
     pub const Assignment = struct {
         name: []const u8,
         value: *Expr,
+        resolved: ?ResolvedSlot = null,
     };
 
     pub const IfStmt = struct {
         condition: *Expr,
-        then_branch: []const *Stmt,
-        else_branch: ?[]const *Stmt,
+        then_branch: []*Stmt,
+        else_branch: ?[]*Stmt,
     };
 
     pub const WhileStmt = struct {
         condition: *Expr,
-        body: []const *Stmt,
+        body: []*Stmt,
     };
 
     pub const FnDecl = struct {
         name: []const u8,
-        params: []const Param,
+        params: []Param,
         return_type: ?[]const u8,
-        body: []const *Stmt,
+        body: []*Stmt,
+        resolved_slot: ?u16 = null,
+        local_slot_count: u16 = 0,
     };
 
     pub const Param = struct {
         name: []const u8,
         type_name: []const u8,
+        resolved_slot: ?u16 = null,
     };
 
     pub const ReturnStmt = struct {

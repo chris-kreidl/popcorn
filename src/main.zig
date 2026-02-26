@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("parser.zig").Parser;
+const Resolver = @import("resolver.zig").Resolver;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Value = @import("interpreter.zig").Value;
 const File = std.fs.File;
@@ -58,6 +59,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
     while (true) {
         try writeAll(stdout, ">> ");
+        // Per-input temporary storage; parser clones any source slices the AST needs.
         var line_arena = std.heap.ArenaAllocator.init(allocator);
         defer line_arena.deinit();
         const line_allocator = line_arena.allocator();
@@ -86,6 +88,22 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
         const msg = parser.error_msg orelse "Unknown error";
         try printFmt(allocator, stderr, "[line {d}] Error: {s}\n", .{ line, msg });
         return .language_error;
+    };
+
+    var resolver = Resolver.init(allocator);
+    defer resolver.deinit();
+    resolver.resolve(stmts) catch |err| {
+        switch (err) {
+            error.TooManyVariablesInScope => {
+                try writeAll(stderr, "Error: Function has more than 65,535 local variables\n");
+                return .language_error;
+            },
+            error.ScopeNestingTooDeep => {
+                try writeAll(stderr, "Error: Scope nesting exceeds 65,535 levels\n");
+                return .language_error;
+            },
+            else => return err,
+        }
     };
 
     const result = interp.interpret(stmts) catch |err| {

@@ -109,7 +109,10 @@ pub const Parser = struct {
                 const param_name_copy = try self.cloneSlice(param_name);
                 const type_name_copy = try self.cloneSlice(self.current.lexeme);
                 self.advance();
-                try params.append(self.allocator, .{ .name = param_name_copy, .type_name = type_name_copy });
+                try params.append(self.allocator, .{
+                    .name = param_name_copy,
+                    .type_name = type_name_copy,
+                });
                 if (self.current.kind != .comma) break;
                 self.advance();
             }
@@ -150,7 +153,7 @@ pub const Parser = struct {
         const then_branch = try self.parseStmtList();
         try self.expect(.rbrace, "Expected '}' after if body");
 
-        var else_branch: ?[]const *Stmt = null;
+        var else_branch: ?[]*Stmt = null;
         if (self.current.kind == .kw_else) {
             self.advance();
             if (self.current.kind == .kw_if) {
@@ -227,7 +230,7 @@ pub const Parser = struct {
         return stmt;
     }
 
-    fn parseStmtList(self: *Parser) ParseError![]const *Stmt {
+    fn parseStmtList(self: *Parser) ParseError![]*Stmt {
         var stmts: std.ArrayList(*Stmt) = .empty;
         while (self.current.kind != .rbrace and self.current.kind != .eof) {
             try stmts.append(self.allocator, try self.parseStatement());
@@ -248,7 +251,10 @@ pub const Parser = struct {
                 try self.expect(.semicolon, "Expected ';' after assignment");
                 const name_copy = try self.cloneSlice(name);
                 const stmt = try self.allocator.create(Stmt);
-                stmt.* = .{ .assignment = .{ .name = name_copy, .value = value } };
+                stmt.* = .{ .assignment = .{
+                    .name = name_copy,
+                    .value = value,
+                } };
                 return stmt;
             }
             // Not an assignment, restore and parse as expression
@@ -438,7 +444,7 @@ pub const Parser = struct {
             .identifier => {
                 const name_copy = try self.cloneSlice(self.current.lexeme);
                 const expr = try self.allocator.create(Expr);
-                expr.* = .{ .identifier = name_copy };
+                expr.* = .{ .identifier = .{ .name = name_copy } };
                 self.advance();
                 return expr;
             },

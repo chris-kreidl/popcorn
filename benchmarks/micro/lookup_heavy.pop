@@ -1,0 +1,19 @@
+// lookup_heavy.pop
+// Variable-lookup-heavy benchmark.
+
+const a: int = 1;
+const b: int = 2;
+const c: int = 3;
+const d: int = 4;
+const e: int = 5;
+const f: int = 6;
+const g: int = 7;
+const h: int = 8;
+
+var i: int = 0;
+var sum: int = 0;
+while i < 2000000 {
+    sum = sum + a + b + c + d + e + f + g + h;
+    i = i + 1;
+}
+print(sum);
