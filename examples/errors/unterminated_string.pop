@@ -1,0 +1,2 @@
+// Expected error: Unexpected token
+var x: string = "hello;

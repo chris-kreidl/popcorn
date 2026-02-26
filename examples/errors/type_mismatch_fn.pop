@@ -1,0 +1,6 @@
+// Expected error: Type error
+fn crash(a: string, b: int) {
+  return a + b;
+}
+
+crash("hello", 42);

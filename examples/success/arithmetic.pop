@@ -1,0 +1,4 @@
+// Expected output: 17
+var x: int = 8;
+var y: int = 9;
+print(x + y);

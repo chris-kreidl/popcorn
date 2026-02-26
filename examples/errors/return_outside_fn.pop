@@ -1,0 +1,2 @@
+// Expected error: Return outside of function
+return 5;

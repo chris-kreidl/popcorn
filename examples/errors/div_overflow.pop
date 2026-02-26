@@ -1,0 +1,4 @@
+// Expected error: Integer overflow
+// minInt(i64) / -1 overflows because the result has no i64 representation
+var x: int = -9223372036854775807 - 1;
+print(x / -1);

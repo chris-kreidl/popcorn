@@ -1,0 +1,10 @@
+// Expected output: ok
+var n: int = 0;
+while n < 2 {
+    n = n + 1;
+}
+if n == 2 {
+    print("ok");
+} else {
+    print("bad");
+}

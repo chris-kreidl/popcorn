@@ -1,0 +1,2 @@
+// Expected error: Division by zero
+var x: float = 1.0 / 0.0;

@@ -1,0 +1,72 @@
+// test.pop - Comprehensive Popcorn test
+
+// Variables and types
+var x: int = 42;
+const pi: float = 3.14;
+var name: string = "Popcorn";
+var flag: bool = true;
+
+print(x);
+print(pi);
+print(name);
+print(flag);
+
+// Arithmetic
+print(10 + 20);
+print(10 - 3);
+print(6 * 7);
+print(10 / 3);
+print(10 % 3);
+
+// String concatenation
+print("Hello, " + "World!");
+
+// Comparisons
+print(5 == 5);
+print(5 != 3);
+print(3 < 5);
+print(5 > 3);
+print(3 <= 3);
+print(5 >= 10);
+
+// Logical operators
+print(true && true);
+print(true && false);
+print(false || true);
+print(false || false);
+
+// Unary
+print(!false);
+print(-42);
+
+// If/else
+if x == 42 {
+    print("x is 42");
+} else {
+    print("x is not 42");
+}
+
+// While loop
+var i: int = 0;
+while i < 5 {
+    print(i);
+    i = i + 1;
+}
+
+// Functions
+fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn greet(who: string): string {
+    return "Hello, " + who;
+}
+
+print(add(3, 4));
+print(greet("Popcorn"));
+
+// Nested function calls
+print(add(add(1, 2), add(3, 4)));
+
+// Const enforcement (would error if uncommented)
+// pi = 2.0;
