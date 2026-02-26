@@ -59,6 +59,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
     while (true) {
         try writeAll(stdout, ">> ");
+        // Per-input temporary storage; parser clones any source slices the AST needs.
         var line_arena = std.heap.ArenaAllocator.init(allocator);
         defer line_arena.deinit();
         const line_allocator = line_arena.allocator();
