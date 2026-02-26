@@ -186,6 +186,14 @@ pub const Interpreter = struct {
         return last_value;
     }
 
+    fn defineBinding(env: *Environment, name: []const u8, resolved_slot: ?u16, value: Value, is_const: bool) InterpreterError!void {
+        if (resolved_slot) |slot| {
+            env.defineResolved(slot, value, is_const) catch return error.RuntimeError;
+        } else {
+            env.define(name, value, is_const) catch return error.RuntimeError;
+        }
+    }
+
     fn executeStmt(self: *Interpreter, stmt: *const Stmt, env: *Environment) InterpreterError!?Value {
         switch (stmt.*) {
             .expr_stmt => |expr| {
@@ -201,11 +209,7 @@ pub const Interpreter = struct {
             },
             .var_decl => |decl| {
                 const val = try self.evalExpr(decl.initializer, env);
-                if (decl.resolved_slot) |slot| {
-                    env.defineResolved(slot, val, decl.is_const) catch return error.RuntimeError;
-                } else {
-                    env.define(decl.name, val, decl.is_const) catch return error.RuntimeError;
-                }
+                try defineBinding(env, decl.name, decl.resolved_slot, val, decl.is_const);
                 return null;
             },
             .assignment => |assign| {
@@ -256,11 +260,7 @@ pub const Interpreter = struct {
                     .closure = env,
                     .local_slot_count = fn_d.local_slot_count,
                 } };
-                if (fn_d.resolved_slot) |slot| {
-                    env.defineResolved(slot, func, true) catch return error.RuntimeError;
-                } else {
-                    env.define(fn_d.name, func, true) catch return error.RuntimeError;
-                }
+                try defineBinding(env, fn_d.name, fn_d.resolved_slot, func, true);
                 return null;
             },
             .return_stmt => |ret| {
@@ -432,11 +432,7 @@ pub const Interpreter = struct {
         }
         for (func.params, c.args) |param, arg_expr| {
             const val = try self.evalExpr(arg_expr, env);
-            if (param.resolved_slot) |slot| {
-                call_env.defineResolved(slot, val, false) catch return error.RuntimeError;
-            } else {
-                call_env.define(param.name, val, false) catch return error.RuntimeError;
-            }
+            try defineBinding(call_env, param.name, param.resolved_slot, val, false);
         }
 
         // Execute function body, catching ReturnSignal
