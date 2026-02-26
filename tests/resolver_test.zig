@@ -162,3 +162,82 @@ test "resolver: scope nesting too deep" {
     defer resolver.deinit();
     try std.testing.expectError(error.ScopeNestingTooDeep, resolver.resolve(stmts));
 }
+
+test "resolver: 3-level deep closure captures correct depth" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\fn outer(a: int): int {
+        \\    fn middle(b: int): int {
+        \\        fn inner(c: int): int {
+        \\            return a + b + c;
+        \\        }
+        \\        return inner(3);
+        \\    }
+        \\    return middle(2);
+        \\}
+        \\print(outer(1));
+    ;
+
+    const stmts = try parseAndResolve(allocator, source);
+    const outer_fn = stmts[0].*.fn_decl;
+    const middle_fn = outer_fn.body[0].*.fn_decl;
+    const inner_fn = middle_fn.body[0].*.fn_decl;
+
+    const ret_expr = inner_fn.body[0].*.return_stmt.value.?.*.binary;
+    // a + b + c is parsed as (a + b) + c
+    const ab_sum = ret_expr.left.*.binary;
+    const a_ident = ab_sum.left.*.identifier;
+    const b_ident = ab_sum.right.*.identifier;
+    const c_ident = ret_expr.right.*.identifier;
+
+    // a is 2 scopes up from inner
+    try std.testing.expectEqual(@as(u16, 2), a_ident.resolved.?.depth);
+    try std.testing.expectEqual(@as(u16, 0), a_ident.resolved.?.slot);
+    // b is 1 scope up from inner
+    try std.testing.expectEqual(@as(u16, 1), b_ident.resolved.?.depth);
+    try std.testing.expectEqual(@as(u16, 0), b_ident.resolved.?.slot);
+    // c is local to inner
+    try std.testing.expectEqual(@as(u16, 0), c_ident.resolved.?.depth);
+    try std.testing.expectEqual(@as(u16, 0), c_ident.resolved.?.slot);
+}
+
+test "resolver: variable in if/while body resolves to outer scope" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\fn f(): int {
+        \\    var x: int = 0;
+        \\    if true {
+        \\        x = x + 1;
+        \\    }
+        \\    while x < 3 {
+        \\        x = x + 1;
+        \\    }
+        \\    return x;
+        \\}
+    ;
+
+    const stmts = try parseAndResolve(allocator, source);
+    const fn_decl = stmts[0].*.fn_decl;
+
+    // x declaration: slot 0 in function scope
+    const x_decl = fn_decl.body[0].*.var_decl;
+    try std.testing.expectEqual(@as(u16, 0), x_decl.resolved_slot.?);
+
+    // if body: x = x + 1; assignment should resolve to depth 1 (up to fn scope)
+    const if_body = fn_decl.body[1].*.if_stmt.then_branch;
+    const if_assign = if_body[0].*.assignment;
+    try std.testing.expectEqual(@as(u16, 1), if_assign.resolved.?.depth);
+    try std.testing.expectEqual(@as(u16, 0), if_assign.resolved.?.slot);
+
+    // while body: x = x + 1; assignment should also resolve to depth 1
+    const while_body = fn_decl.body[2].*.while_stmt.body;
+    const while_assign = while_body[0].*.assignment;
+    try std.testing.expectEqual(@as(u16, 1), while_assign.resolved.?.depth);
+    try std.testing.expectEqual(@as(u16, 0), while_assign.resolved.?.slot);
+}

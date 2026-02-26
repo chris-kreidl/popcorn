@@ -105,6 +105,80 @@ test "slot access: depth-based closure lookup" {
     try std.testing.expectEqualStrings("7\n", interp.output.items);
 }
 
+test "slot access: 3-level deep closure execution" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\fn outer(a: int): int {
+        \\    fn middle(b: int): int {
+        \\        fn inner(c: int): int {
+        \\            return a + b + c;
+        \\        }
+        \\        return inner(3);
+        \\    }
+        \\    return middle(2);
+        \\}
+        \\print(outer(1));
+    ;
+
+    const interp = try parseResolveRun(allocator, source);
+    try std.testing.expectEqualStrings("6\n", interp.output.items);
+}
+
+test "slot access: block scope does not leak variables" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // x is declared inside a block; accessing it after the block should fail
+    const source =
+        \\fn f(): int {
+        \\    {
+        \\        var x: int = 42;
+        \\        print(x);
+        \\    }
+        \\    return x;
+        \\}
+        \\print(f());
+    ;
+
+    var parser = Parser.init(allocator, source);
+    const stmts: []*Stmt = try parser.parse();
+
+    var resolver = Resolver.init(allocator);
+    defer resolver.deinit();
+    try resolver.resolve(stmts);
+
+    var interp = try Interpreter.init(allocator);
+    const result = interp.interpret(stmts);
+    try std.testing.expectError(error.UndefinedVariable, result);
+}
+
+test "slot access: if/while body accesses outer variable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\fn f(): int {
+        \\    var x: int = 0;
+        \\    if true {
+        \\        x = x + 1;
+        \\    }
+        \\    while x < 3 {
+        \\        x = x + 1;
+        \\    }
+        \\    return x;
+        \\}
+        \\print(f());
+    ;
+
+    const interp = try parseResolveRun(allocator, source);
+    try std.testing.expectEqualStrings("3\n", interp.output.items);
+}
+
 test "slot access: uninitialized slot returns null/undefined" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
