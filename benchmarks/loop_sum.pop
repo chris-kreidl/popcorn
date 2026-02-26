@@ -1,0 +1,10 @@
+// loop_sum.pop
+// Integer loop and accumulation benchmark.
+
+var i: int = 0;
+var sum: int = 0;
+while i < 5000000 {
+    sum = sum + i;
+    i = i + 1;
+}
+print(sum);
