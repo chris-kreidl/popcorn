@@ -290,6 +290,7 @@ pub const Interpreter = struct {
             .star => checkedInt(l, r, .mul),
             .slash => {
                 if (r == 0) return error.DivisionByZero;
+                if (l == std.math.minInt(i64) and r == -1) return error.IntegerOverflow;
                 return Value{ .int = @divTrunc(l, r) };
             },
             .percent => {
