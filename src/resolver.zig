@@ -200,7 +200,7 @@ pub const Resolver = struct {
         }
 
         for (fn_decl.params) |*param| {
-            param.resolved_slot = (try self.declareInCurrentScope(param.name)).?;
+            param.resolved_slot = (try self.declareInCurrentScope(param.name)) orelse unreachable;
         }
 
         for (fn_decl.body) |child| {
