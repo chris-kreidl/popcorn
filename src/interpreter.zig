@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const Expr = ast.Expr;
 const Stmt = ast.Stmt;
+const ResolvedSlot = ast.ResolvedSlot;
 const TokenType = @import("token.zig").TokenType;
 
 pub const Value = union(enum) {
@@ -48,6 +49,7 @@ pub const Value = union(enum) {
 // No individual deinit is needed.
 pub const Environment = struct {
     values: std.StringHashMap(Entry),
+    slots: std.ArrayList(SlotEntry),
     parent: ?*Environment,
     allocator: std.mem.Allocator,
 
@@ -56,10 +58,17 @@ pub const Environment = struct {
         is_const: bool,
     };
 
+    const SlotEntry = struct {
+        value: Value,
+        is_const: bool,
+        is_set: bool,
+    };
+
     pub fn init(allocator: std.mem.Allocator, parent: ?*Environment) !*Environment {
         const env = try allocator.create(Environment);
         env.* = .{
             .values = std.StringHashMap(Entry).init(allocator),
+            .slots = .empty,
             .parent = parent,
             .allocator = allocator,
         };
@@ -92,6 +101,60 @@ pub const Environment = struct {
             return p.set(name, value);
         }
         return error.UndefinedVariable;
+    }
+
+    fn ancestor(self: *Environment, depth: u16) ?*Environment {
+        var env: ?*Environment = self;
+        var i: u16 = 0;
+        while (i < depth) : (i += 1) {
+            env = env.?.parent;
+            if (env == null) return null;
+        }
+        return env;
+    }
+
+    fn ensureSlotCapacity(self: *Environment, slot: u16) !void {
+        const needed: usize = @as(usize, slot) + 1;
+        if (self.slots.items.len >= needed) return;
+        const old_len = self.slots.items.len;
+        try self.slots.resize(self.allocator, needed);
+        var i = old_len;
+        while (i < needed) : (i += 1) {
+            self.slots.items[i] = .{
+                .value = .null_val,
+                .is_const = false,
+                .is_set = false,
+            };
+        }
+    }
+
+    pub fn defineResolved(self: *Environment, slot: u16, value: Value, is_const: bool) !void {
+        try self.ensureSlotCapacity(slot);
+        self.slots.items[slot] = .{
+            .value = value,
+            .is_const = is_const,
+            .is_set = true,
+        };
+    }
+
+    pub fn getResolved(self: *Environment, resolved: ResolvedSlot) ?Value {
+        const env = self.ancestor(resolved.depth) orelse return null;
+        const slot_index: usize = @intCast(resolved.slot);
+        if (slot_index >= env.slots.items.len) return null;
+        const slot = env.slots.items[slot_index];
+        if (!slot.is_set) return null;
+        return slot.value;
+    }
+
+    pub fn setResolved(self: *Environment, resolved: ResolvedSlot, value: Value) !void {
+        const env = self.ancestor(resolved.depth) orelse return error.UndefinedVariable;
+        const slot_index: usize = @intCast(resolved.slot);
+        if (slot_index >= env.slots.items.len) return error.UndefinedVariable;
+
+        const slot_entry = &env.slots.items[slot_index];
+        if (!slot_entry.is_set) return error.UndefinedVariable;
+        if (slot_entry.is_const) return error.ConstAssignment;
+        slot_entry.value = value;
     }
 };
 
@@ -137,11 +200,23 @@ pub const Interpreter = struct {
             },
             .var_decl => |decl| {
                 const val = try self.evalExpr(decl.initializer, env);
-                env.define(decl.name, val, decl.is_const) catch return error.RuntimeError;
+                if (decl.resolved_slot) |slot| {
+                    env.defineResolved(slot, val, decl.is_const) catch return error.RuntimeError;
+                } else {
+                    env.define(decl.name, val, decl.is_const) catch return error.RuntimeError;
+                }
                 return null;
             },
             .assignment => |assign| {
                 const val = try self.evalExpr(assign.value, env);
+                if (assign.resolved) |resolved| {
+                    env.setResolved(resolved, val) catch |err| switch (err) {
+                        error.ConstAssignment => return error.ConstAssignment,
+                        error.UndefinedVariable => return error.UndefinedVariable,
+                    };
+                    return null;
+                }
+
                 env.set(assign.name, val) catch |err| switch (err) {
                     error.ConstAssignment => return error.ConstAssignment,
                     error.UndefinedVariable => return error.UndefinedVariable,
@@ -179,7 +254,11 @@ pub const Interpreter = struct {
                     .body = fn_d.body,
                     .closure = env,
                 } };
-                env.define(fn_d.name, func, true) catch return error.RuntimeError;
+                if (fn_d.resolved_slot) |slot| {
+                    env.defineResolved(slot, func, true) catch return error.RuntimeError;
+                } else {
+                    env.define(fn_d.name, func, true) catch return error.RuntimeError;
+                }
                 return null;
             },
             .return_stmt => |ret| {
@@ -206,8 +285,11 @@ pub const Interpreter = struct {
             .string_literal => |v| Value{ .string = v },
             .bool_literal => |v| Value{ .boolean = v },
             .null_literal => Value.null_val,
-            .identifier => |name| {
-                return env.get(name) orelse error.UndefinedVariable;
+            .identifier => |identifier| {
+                if (identifier.resolved) |resolved| {
+                    return env.getResolved(resolved) orelse error.UndefinedVariable;
+                }
+                return env.get(identifier.name) orelse error.UndefinedVariable;
             },
             .grouping => |inner| self.evalExpr(inner, env),
             .unary => |u| self.evalUnary(u, env),
@@ -327,7 +409,10 @@ pub const Interpreter = struct {
     }
 
     fn evalCall(self: *Interpreter, c: Expr.Call, env: *Environment) InterpreterError!Value {
-        const callee_val = env.get(c.callee) orelse return error.UndefinedVariable;
+        const callee_val = if (c.callee_resolved) |resolved|
+            env.getResolved(resolved) orelse return error.UndefinedVariable
+        else
+            env.get(c.callee) orelse return error.UndefinedVariable;
         const func = switch (callee_val) {
             .function => |f| f,
             else => return error.TypeError,
@@ -340,7 +425,11 @@ pub const Interpreter = struct {
         const call_env = Environment.init(self.allocator, func.closure) catch return error.RuntimeError;
         for (func.params, c.args) |param, arg_expr| {
             const val = try self.evalExpr(arg_expr, env);
-            call_env.define(param.name, val, false) catch return error.RuntimeError;
+            if (param.resolved_slot) |slot| {
+                call_env.defineResolved(slot, val, false) catch return error.RuntimeError;
+            } else {
+                call_env.define(param.name, val, false) catch return error.RuntimeError;
+            }
         }
 
         // Execute function body, catching ReturnSignal

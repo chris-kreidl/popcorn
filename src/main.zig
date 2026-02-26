@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("parser.zig").Parser;
+const Resolver = @import("resolver.zig").Resolver;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Value = @import("interpreter.zig").Value;
 const File = std.fs.File;
@@ -87,6 +88,10 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
         try printFmt(allocator, stderr, "[line {d}] Error: {s}\n", .{ line, msg });
         return .language_error;
     };
+
+    var resolver = Resolver.init(allocator);
+    defer resolver.deinit();
+    try resolver.resolve(stmts);
 
     const result = interp.interpret(stmts) catch |err| {
         const msg: []const u8 = switch (err) {
