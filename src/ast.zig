@@ -1,5 +1,3 @@
-const std = @import("std");
-const Token = @import("token.zig").Token;
 const TokenType = @import("token.zig").TokenType;
 
 pub const Expr = union(enum) {
