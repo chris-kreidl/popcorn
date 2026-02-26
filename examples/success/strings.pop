@@ -1,0 +1,3 @@
+// Expected output: Hello, Popcorn!
+var name: string = "Popcorn";
+print("Hello, " + name + "!");
