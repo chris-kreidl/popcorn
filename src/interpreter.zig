@@ -427,17 +427,8 @@ pub const Interpreter = struct {
         const call_env = Environment.init(self.allocator, func.closure) catch return error.RuntimeError;
         if (func.local_slot_count > 0) {
             const slot_count: usize = @intCast(func.local_slot_count);
-            call_env.slots.ensureTotalCapacity(self.allocator, slot_count) catch return error.RuntimeError;
-            const old_len = call_env.slots.items.len;
-            call_env.slots.resize(self.allocator, slot_count) catch return error.RuntimeError;
-            var i = old_len;
-            while (i < slot_count) : (i += 1) {
-                call_env.slots.items[i] = .{
-                    .value = .null_val,
-                    .is_const = false,
-                    .is_set = false,
-                };
-            }
+            const last_slot: u16 = @intCast(slot_count - 1);
+            call_env.ensureSlotCapacity(last_slot) catch return error.RuntimeError;
         }
         for (func.params, c.args) |param, arg_expr| {
             const val = try self.evalExpr(arg_expr, env);
