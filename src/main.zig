@@ -3,6 +3,7 @@ const Parser = @import("parser.zig").Parser;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Value = @import("interpreter.zig").Value;
 const File = std.fs.File;
+const RunStatus = enum { ok, language_error };
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -40,7 +41,10 @@ fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     defer allocator.free(source);
 
     var interp = try Interpreter.init(allocator);
-    try run(allocator, source, &interp, false);
+    const status = try run(allocator, source, &interp, false);
+    if (status == .language_error) {
+        std.process.exit(1);
+    }
 }
 
 fn runRepl(allocator: std.mem.Allocator) !void {
@@ -65,11 +69,11 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
         if (line.len == 0) continue;
 
-        try run(allocator, line, &interp, true);
+        _ = try run(allocator, line, &interp, true);
     }
 }
 
-fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) !void {
+fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) !RunStatus {
     const stderr = File.stderr();
     const stdout = File.stdout();
 
@@ -78,7 +82,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
         const line = parser.current.line;
         const msg = parser.error_msg orelse "Unknown error";
         try printFmt(allocator, stderr, "[line {d}] Error: {s}\n", .{ line, msg });
-        return;
+        return .language_error;
     };
 
     const result = interp.interpret(stmts) catch |err| {
@@ -93,7 +97,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             error.ReturnSignal => "Return outside of function",
         };
         try printFmt(allocator, stderr, "Error: {s}\n", .{msg});
-        return;
+        return .language_error;
     };
 
     // Flush interpreter output
@@ -115,4 +119,6 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             }
         }
     }
+
+    return .ok;
 }
