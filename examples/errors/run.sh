@@ -14,14 +14,18 @@ PASS=0
 FAIL=0
 
 for file in "$SCRIPT_DIR"/*.pop; do
-    # Extract expected error from first line
-    expected=$(head -1 "$file" | sed 's|^// Expected error: ||')
+    # Extract expected error from first line (must match prefix exactly)
+    first_line=$(head -1 "$file")
+    expected="${first_line#// Expected error: }"
+    if [ "$expected" = "$first_line" ]; then
+        expected=""
+    fi
 
     # Run and capture combined output (interpreter prints errors to stderr)
     output=$("$POPCORN" "$file" 2>&1 || true)
 
     name=$(basename "$file")
-    if echo "$output" | grep -qi "$expected"; then
+    if [ -n "$expected" ] && echo "$output" | grep -qiF "$expected"; then
         printf "  PASS  %s\n" "$name"
         PASS=$((PASS + 1))
     else
