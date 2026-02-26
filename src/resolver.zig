@@ -17,7 +17,7 @@ pub const Resolver = struct {
 
     const Scope = struct {
         slots: std.StringHashMap(u16),
-        next_slot: usize,
+        next_slot: u16,
     };
 
     pub fn init(allocator: std.mem.Allocator) Resolver {
@@ -65,7 +65,7 @@ pub const Resolver = struct {
         var scope = self.scopes.pop().?;
         const slot_count = scope.next_slot;
         scope.slots.deinit();
-        return @intCast(slot_count);
+        return slot_count;
     }
 
     fn declareInCurrentScope(self: *Resolver, name: []const u8) ResolveError!?u16 {
@@ -82,7 +82,7 @@ pub const Resolver = struct {
             return error.TooManyVariablesInScope;
         }
 
-        const slot: u16 = @intCast(scope.next_slot);
+        const slot = scope.next_slot;
         scope.next_slot += 1;
         try scope.slots.put(name, slot);
         return slot;
