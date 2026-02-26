@@ -7,17 +7,29 @@ const ResolvedSlot = ast.ResolvedSlot;
 pub const Resolver = struct {
     allocator: std.mem.Allocator,
     scopes: std.ArrayList(Scope),
-    const ResolveError = error{OutOfMemory};
+    max_slots_per_scope: u16,
+    max_scope_depth: u16,
+    const ResolveError = error{
+        OutOfMemory,
+        TooManyVariablesInScope,
+        ScopeNestingTooDeep,
+    };
 
     const Scope = struct {
         slots: std.StringHashMap(u16),
-        next_slot: u16,
+        next_slot: usize,
     };
 
     pub fn init(allocator: std.mem.Allocator) Resolver {
+        return initWithLimits(allocator, std.math.maxInt(u16), std.math.maxInt(u16));
+    }
+
+    pub fn initWithLimits(allocator: std.mem.Allocator, max_slots_per_scope: u16, max_scope_depth: u16) Resolver {
         return .{
             .allocator = allocator,
             .scopes = .empty,
+            .max_slots_per_scope = max_slots_per_scope,
+            .max_scope_depth = max_scope_depth,
         };
     }
 
@@ -49,7 +61,7 @@ pub const Resolver = struct {
         var scope = self.scopes.pop().?;
         const slot_count = scope.next_slot;
         scope.slots.deinit();
-        return slot_count;
+        return @intCast(slot_count);
     }
 
     fn declareInCurrentScope(self: *Resolver, name: []const u8) ResolveError!?u16 {
@@ -62,20 +74,28 @@ pub const Resolver = struct {
             return slot;
         }
 
-        const slot = scope.next_slot;
+        if (scope.next_slot >= self.max_slots_per_scope) {
+            return error.TooManyVariablesInScope;
+        }
+
+        const slot: u16 = @intCast(scope.next_slot);
         scope.next_slot += 1;
         try scope.slots.put(name, slot);
         return slot;
     }
 
-    fn resolveName(self: *Resolver, name: []const u8) ?ResolvedSlot {
-        var depth: u16 = 0;
+    fn resolveName(self: *Resolver, name: []const u8) ResolveError!?ResolvedSlot {
+        var depth: usize = 0;
         var i: usize = self.scopes.items.len;
         while (i > 0) {
+            if (depth > self.max_scope_depth) {
+                return error.ScopeNestingTooDeep;
+            }
+
             i -= 1;
             const scope = &self.scopes.items[i];
             if (scope.slots.get(name)) |slot| {
-                return .{ .depth = depth, .slot = slot };
+                return .{ .depth = @intCast(depth), .slot = slot };
             }
             depth += 1;
         }
@@ -93,7 +113,7 @@ pub const Resolver = struct {
             },
             .assignment => |*assign| {
                 try self.resolveExpr(assign.value);
-                assign.resolved = self.resolveName(assign.name);
+                assign.resolved = try self.resolveName(assign.name);
             },
             .block => |stmts| {
                 try self.beginScope();
@@ -145,7 +165,7 @@ pub const Resolver = struct {
             .null_literal,
             => {},
             .identifier => |*identifier| {
-                identifier.resolved = self.resolveName(identifier.name);
+                identifier.resolved = try self.resolveName(identifier.name);
             },
             .grouping => |inner| try self.resolveExpr(inner),
             .unary => |unary| try self.resolveExpr(unary.operand),
@@ -154,7 +174,7 @@ pub const Resolver = struct {
                 try self.resolveExpr(binary.right);
             },
             .call => |*call| {
-                call.callee_resolved = self.resolveName(call.callee);
+                call.callee_resolved = try self.resolveName(call.callee);
                 for (call.args) |arg| {
                     try self.resolveExpr(arg);
                 }

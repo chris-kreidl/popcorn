@@ -118,3 +118,47 @@ test "resolver: closure captures outer variable with depth" {
     try std.testing.expectEqual(@as(u16, 0), b_ident.resolved.?.depth);
     try std.testing.expectEqual(@as(u16, 0), b_ident.resolved.?.slot);
 }
+
+test "resolver: too many variables in scope" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\fn f(): int {
+        \\    var a: int = 1;
+        \\    var b: int = 2;
+        \\    var c: int = 3;
+        \\    return a + b + c;
+        \\}
+    ;
+
+    var parser = Parser.init(allocator, source);
+    const stmts = try parser.parse();
+
+    var resolver = Resolver.initWithLimits(allocator, 2, std.math.maxInt(u16));
+    defer resolver.deinit();
+    try std.testing.expectError(error.TooManyVariablesInScope, resolver.resolve(stmts));
+}
+
+test "resolver: scope nesting too deep" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const source =
+        \\var x: int = 1;
+        \\{
+        \\    {
+        \\        print(x);
+        \\    }
+        \\}
+    ;
+
+    var parser = Parser.init(allocator, source);
+    const stmts = try parser.parse();
+
+    var resolver = Resolver.initWithLimits(allocator, std.math.maxInt(u16), 1);
+    defer resolver.deinit();
+    try std.testing.expectError(error.ScopeNestingTooDeep, resolver.resolve(stmts));
+}

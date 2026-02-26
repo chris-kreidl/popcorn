@@ -91,7 +91,19 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
 
     var resolver = Resolver.init(allocator);
     defer resolver.deinit();
-    try resolver.resolve(stmts);
+    resolver.resolve(stmts) catch |err| {
+        switch (err) {
+            error.TooManyVariablesInScope => {
+                try writeAll(stderr, "Error: Function has more than 65,535 local variables\n");
+                return .language_error;
+            },
+            error.ScopeNestingTooDeep => {
+                try writeAll(stderr, "Error: Scope nesting exceeds 65,535 levels\n");
+                return .language_error;
+            },
+            else => return err,
+        }
+    };
 
     const result = interp.interpret(stmts) catch |err| {
         const msg: []const u8 = switch (err) {
