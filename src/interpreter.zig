@@ -309,8 +309,14 @@ pub const Interpreter = struct {
             .plus => Value{ .float = l + r },
             .minus => Value{ .float = l - r },
             .star => Value{ .float = l * r },
-            .slash => Value{ .float = l / r },
-            .percent => Value{ .float = @mod(l, r) },
+            .slash => {
+                if (r == 0.0) return error.DivisionByZero;
+                return Value{ .float = l / r };
+            },
+            .percent => {
+                if (r == 0.0) return error.DivisionByZero;
+                return Value{ .float = @mod(l, r) };
+            },
             .less => Value{ .boolean = l < r },
             .greater => Value{ .boolean = l > r },
             .less_equal => Value{ .boolean = l <= r },
