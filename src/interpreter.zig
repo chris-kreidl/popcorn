@@ -228,6 +228,10 @@ pub const Interpreter = struct {
                 };
                 return null;
             },
+            // Note: .block creates its own environment, and if_stmt/while_stmt/fn
+            // also create child environments via executeBlock. This matches the
+            // resolver's scoping. Bodies are raw []*Stmt, not .block nodes —
+            // see resolver.zig for details.
             .block => |stmts| {
                 const block_env = Environment.init(self.allocator, env) catch return error.RuntimeError;
                 return self.executeStmts(stmts, block_env);
