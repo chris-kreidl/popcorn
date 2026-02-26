@@ -82,6 +82,7 @@ pub const Stmt = union(enum) {
         return_type: ?[]const u8,
         body: []const *Stmt,
         resolved_slot: ?u16 = null,
+        local_slot_count: u16 = 0,
     };
 
     pub const Param = struct {

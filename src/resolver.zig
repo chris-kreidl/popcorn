@@ -7,6 +7,7 @@ const ResolvedSlot = ast.ResolvedSlot;
 pub const Resolver = struct {
     allocator: std.mem.Allocator,
     scopes: std.ArrayList(Scope),
+    const ResolveError = error{OutOfMemory};
 
     const Scope = struct {
         slots: std.StringHashMap(u16),
@@ -27,16 +28,16 @@ pub const Resolver = struct {
         self.scopes.deinit(self.allocator);
     }
 
-    pub fn resolve(self: *Resolver, stmts: []const *Stmt) !void {
+    pub fn resolve(self: *Resolver, stmts: []const *Stmt) ResolveError!void {
         try self.beginScope();
-        defer self.endScope();
+        defer _ = self.endScope();
 
         for (stmts) |stmt| {
             try self.resolveStmt(stmt);
         }
     }
 
-    fn beginScope(self: *Resolver) !void {
+    fn beginScope(self: *Resolver) ResolveError!void {
         const scope = Scope{
             .slots = std.StringHashMap(u16).init(self.allocator),
             .next_slot = 0,
@@ -44,12 +45,14 @@ pub const Resolver = struct {
         try self.scopes.append(self.allocator, scope);
     }
 
-    fn endScope(self: *Resolver) void {
+    fn endScope(self: *Resolver) u16 {
         var scope = self.scopes.pop().?;
+        const slot_count = scope.next_slot;
         scope.slots.deinit();
+        return slot_count;
     }
 
-    fn declareInCurrentScope(self: *Resolver, name: []const u8) !?u16 {
+    fn declareInCurrentScope(self: *Resolver, name: []const u8) ResolveError!?u16 {
         if (self.scopes.items.len == 0) {
             return null;
         }
@@ -79,7 +82,7 @@ pub const Resolver = struct {
         return null;
     }
 
-    fn resolveStmt(self: *Resolver, stmt_ptr: *const Stmt) !void {
+    fn resolveStmt(self: *Resolver, stmt_ptr: *const Stmt) ResolveError!void {
         const stmt = @constCast(stmt_ptr);
         switch (stmt.*) {
             .expr_stmt => |expr| try self.resolveExpr(expr),
@@ -94,7 +97,7 @@ pub const Resolver = struct {
             },
             .block => |stmts| {
                 try self.beginScope();
-                defer self.endScope();
+                defer _ = self.endScope();
                 for (stmts) |child| {
                     try self.resolveStmt(child);
                 }
@@ -102,14 +105,14 @@ pub const Resolver = struct {
             .if_stmt => |if_stmt| {
                 try self.resolveExpr(if_stmt.condition);
                 try self.beginScope();
-                defer self.endScope();
+                defer _ = self.endScope();
                 for (if_stmt.then_branch) |child| {
                     try self.resolveStmt(child);
                 }
 
                 if (if_stmt.else_branch) |else_branch| {
                     try self.beginScope();
-                    defer self.endScope();
+                    defer _ = self.endScope();
                     for (else_branch) |child| {
                         try self.resolveStmt(child);
                     }
@@ -118,25 +121,12 @@ pub const Resolver = struct {
             .while_stmt => |while_stmt| {
                 try self.resolveExpr(while_stmt.condition);
                 try self.beginScope();
-                defer self.endScope();
+                defer _ = self.endScope();
                 for (while_stmt.body) |child| {
                     try self.resolveStmt(child);
                 }
             },
-            .fn_decl => |*fn_decl| {
-                fn_decl.resolved_slot = try self.declareInCurrentScope(fn_decl.name);
-
-                try self.beginScope();
-                defer self.endScope();
-
-                for (fn_decl.params) |*param| {
-                    param.resolved_slot = (try self.declareInCurrentScope(param.name)).?;
-                }
-
-                for (fn_decl.body) |child| {
-                    try self.resolveStmt(child);
-                }
-            },
+            .fn_decl => |*fn_decl| try self.resolveFnDecl(fn_decl),
             .return_stmt => |ret| {
                 if (ret.value) |value| {
                     try self.resolveExpr(value);
@@ -145,7 +135,7 @@ pub const Resolver = struct {
         }
     }
 
-    fn resolveExpr(self: *Resolver, expr: *const Expr) !void {
+    fn resolveExpr(self: *Resolver, expr: *const Expr) ResolveError!void {
         const node = @constCast(expr);
         switch (node.*) {
             .integer_literal,
@@ -170,5 +160,20 @@ pub const Resolver = struct {
                 }
             },
         }
+    }
+
+    fn resolveFnDecl(self: *Resolver, fn_decl: *Stmt.FnDecl) ResolveError!void {
+        fn_decl.resolved_slot = try self.declareInCurrentScope(fn_decl.name);
+
+        try self.beginScope();
+        for (fn_decl.params) |*param| {
+            param.resolved_slot = (try self.declareInCurrentScope(param.name)).?;
+        }
+
+        for (fn_decl.body) |child| {
+            try self.resolveStmt(child);
+        }
+
+        fn_decl.local_slot_count = self.endScope();
     }
 };

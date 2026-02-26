@@ -18,6 +18,7 @@ pub const Value = union(enum) {
         params: []const Stmt.Param,
         body: []const *Stmt,
         closure: *Environment,
+        local_slot_count: u16,
     };
 
     pub fn isTruthy(self: Value) bool {
@@ -253,6 +254,7 @@ pub const Interpreter = struct {
                     .params = fn_d.params,
                     .body = fn_d.body,
                     .closure = env,
+                    .local_slot_count = fn_d.local_slot_count,
                 } };
                 if (fn_d.resolved_slot) |slot| {
                     env.defineResolved(slot, func, true) catch return error.RuntimeError;
@@ -423,6 +425,20 @@ pub const Interpreter = struct {
         }
 
         const call_env = Environment.init(self.allocator, func.closure) catch return error.RuntimeError;
+        if (func.local_slot_count > 0) {
+            const slot_count: usize = @intCast(func.local_slot_count);
+            call_env.slots.ensureTotalCapacity(self.allocator, slot_count) catch return error.RuntimeError;
+            const old_len = call_env.slots.items.len;
+            call_env.slots.resize(self.allocator, slot_count) catch return error.RuntimeError;
+            var i = old_len;
+            while (i < slot_count) : (i += 1) {
+                call_env.slots.items[i] = .{
+                    .value = .null_val,
+                    .is_const = false,
+                    .is_set = false,
+                };
+            }
+        }
         for (func.params, c.args) |param, arg_expr| {
             const val = try self.evalExpr(arg_expr, env);
             if (param.resolved_slot) |slot| {
