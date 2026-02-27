@@ -789,9 +789,7 @@ pub const Vm = struct {
 
         if (slot_count != 0) {
             self.locals.resize(self.allocator, base + slot_count) catch return error.RuntimeError;
-            for (base..base + slot_count) |i| {
-                self.locals.items[i] = .{ .value = .null_val, .is_set = false, .is_const = false };
-            }
+            @memset(self.locals.items[base..base + slot_count], LocalSlot{ .value = .null_val, .is_set = false, .is_const = false });
         }
 
         self.scope_stack.append(self.allocator, .{ .base = base, .len = slot_count }) catch return error.RuntimeError;
@@ -1164,25 +1162,23 @@ pub const Vm = struct {
 
                     try self.pushFrame(fn_obj, callee_idx);
                     const new_fr = self.frame();
+                    const locals_base = new_fr.locals_base;
                     for (fn_obj.param_slots, 0..) |slot, i| {
-                        const root_scope = try self.currentScope(new_fr);
-                        const slot_i: usize = @intCast(slot);
-                        if (slot_i >= root_scope.len) return error.RuntimeError;
-                        const idx = root_scope.base + slot_i;
-                        const arg_val = self.stack.items[callee_idx + 1 + i];
-                        self.locals.items[idx] = .{ .value = arg_val, .is_set = true, .is_const = false };
+                        const idx = locals_base + @as(usize, slot);
+                        self.locals.items[idx] = .{ .value = self.stack.items[callee_idx + 1 + i], .is_set = true, .is_const = false };
                     }
                 },
                 .ret => {
-                    const ret_val = try self.pop();
+                    if (self.stack.items.len == 0) return error.RuntimeError;
+                    const ret_val = self.stack.items[self.stack.items.len - 1];
                     const finished = self.frames.pop().?;
-                    self.scope_stack.shrinkRetainingCapacity(finished.scope_base);
-                    self.locals.shrinkRetainingCapacity(finished.locals_base);
-                    self.stack.shrinkRetainingCapacity(finished.stack_base);
+                    self.scope_stack.items.len = finished.scope_base;
+                    self.locals.items.len = finished.locals_base;
                     if (self.frames.items.len == 0) {
                         return ret_val;
                     }
-                    try self.push(ret_val);
+                    self.stack.items[finished.stack_base] = ret_val;
+                    self.stack.items.len = finished.stack_base + 1;
                 },
             }
         }
