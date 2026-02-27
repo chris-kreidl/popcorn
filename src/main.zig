@@ -116,7 +116,10 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
     if (vmEnabled(allocator)) {
         var vm = Vm.init(allocator);
         const vm_result = vm.runProgram(stmts) catch |err| switch (err) {
-            error.UnsupportedFeature => null,
+            error.UnsupportedFeature => {
+                try writeAll(stderr, "Warning: VM encountered unsupported feature; falling back to interpreter\n");
+                return null;
+            },
             error.TypeError => {
                 try printFmt(allocator, stderr, "Error: Type error\n", .{});
                 return .language_error;
