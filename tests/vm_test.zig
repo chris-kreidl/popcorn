@@ -77,7 +77,7 @@ test "vm: script locals stay fast and remain visible to functions" {
     try std.testing.expect(vm.hasGlobal("x"));
 }
 
-test "vm: closures currently unsupported" {
+test "vm: nested function captures outer locals" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -94,7 +94,8 @@ test "vm: closures currently unsupported" {
 
     const stmts = try parseAndResolve(allocator, source);
     var vm = Vm.init(allocator);
-    try std.testing.expectError(error.UnsupportedFeature, vm.runProgram(stmts));
+    _ = try vm.runProgram(stmts);
+    try std.testing.expectEqualStrings("7\n", vm.output.items);
 }
 
 test "vm: top-level vars are not exported when no function references them" {
