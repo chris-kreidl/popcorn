@@ -954,6 +954,7 @@ pub const Vm = struct {
                 .load_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
+                    if (idx >= self.locals.items.len) return error.UndefinedVariable;
                     try self.push(self.locals.items[idx].value);
                 },
                 .set_frame_local => {
@@ -1347,4 +1348,27 @@ test "vm: pop on empty stack returns runtime error" {
 
     var vm = Vm.init(allocator);
     try std.testing.expectError(error.RuntimeError, vm.pop());
+}
+
+test "vm: load_frame_local out-of-bounds returns undefined variable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var vm = Vm.init(allocator);
+
+    const func = try allocator.create(Function);
+    func.* = .{
+        .name = "<test>",
+        .arity = 0,
+        .local_slot_count = 0,
+        .param_slots = &.{},
+        .chunk = Chunk.init(),
+    };
+    try func.chunk.emitOp(allocator, .load_frame_local);
+    try func.chunk.emitU16(allocator, 1);
+    try func.chunk.emitOp(allocator, .ret);
+
+    try vm.pushFrame(func, 0);
+    try std.testing.expectError(error.UndefinedVariable, vm.execute());
 }
