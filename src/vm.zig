@@ -960,8 +960,12 @@ pub const Vm = struct {
                 .set_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
+                    if (idx >= self.locals.items.len) return error.UndefinedVariable;
+                    const local = &self.locals.items[idx];
+                    if (!local.is_set) return error.UndefinedVariable;
+                    if (local.is_const) return error.ConstAssignment;
                     const v = try self.pop();
-                    self.locals.items[idx].value = v;
+                    local.value = v;
                 },
 
                 .add => {
@@ -1371,4 +1375,38 @@ test "vm: load_frame_local out-of-bounds returns undefined variable" {
 
     try vm.pushFrame(func, 0);
     try std.testing.expectError(error.UndefinedVariable, vm.execute());
+}
+
+test "vm: set_frame_local respects const assignment checks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var vm = Vm.init(allocator);
+
+    const func = try allocator.create(Function);
+    func.* = .{
+        .name = "<test>",
+        .arity = 0,
+        .local_slot_count = 1,
+        .param_slots = &.{},
+        .chunk = Chunk.init(),
+    };
+
+    const one_idx = try func.chunk.addConst(allocator, .{ .int = 1 });
+    const two_idx = try func.chunk.addConst(allocator, .{ .int = 2 });
+
+    try func.chunk.emitPushConst(allocator, one_idx);
+    try func.chunk.emitOp(allocator, .define_local);
+    try func.chunk.emitU16(allocator, 0);
+    try func.chunk.emitU8(allocator, 1);
+
+    try func.chunk.emitPushConst(allocator, two_idx);
+    try func.chunk.emitOp(allocator, .set_frame_local);
+    try func.chunk.emitU16(allocator, 0);
+
+    try func.chunk.emitOp(allocator, .ret);
+
+    try vm.pushFrame(func, 0);
+    try std.testing.expectError(error.ConstAssignment, vm.execute());
 }
