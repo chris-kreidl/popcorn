@@ -37,13 +37,15 @@ pub const Value = union(enum) {
         };
     }
 
+    // Returns an allocator-owned string representation. Caller owns the memory
+    // and must free it with the same allocator.
     pub fn toString(self: Value, allocator: std.mem.Allocator) []const u8 {
         return switch (self) {
             .int => |v| std.fmt.allocPrint(allocator, "{d}", .{v}) catch @panic("OOM"),
             .float => |v| std.fmt.allocPrint(allocator, "{d}", .{v}) catch @panic("OOM"),
-            .string => |v| v,
-            .boolean => |v| if (v) "true" else "false",
-            .null_val => "null",
+            .string => |v| allocator.dupe(u8, v) catch @panic("OOM"),
+            .boolean => |v| std.fmt.allocPrint(allocator, "{s}", .{if (v) "true" else "false"}) catch @panic("OOM"),
+            .null_val => std.fmt.allocPrint(allocator, "null", .{}) catch @panic("OOM"),
             .function => |f| std.fmt.allocPrint(allocator, "<fn {s}>", .{f.name}) catch @panic("OOM"),
         };
     }
@@ -1158,6 +1160,7 @@ pub const Vm = struct {
                 .print => {
                     const v = try self.pop();
                     const s = v.toString(self.allocator);
+                    defer self.allocator.free(s);
                     self.output.appendSlice(self.allocator, s) catch return error.RuntimeError;
                     self.output.append(self.allocator, '\n') catch return error.RuntimeError;
                 },

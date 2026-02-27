@@ -158,6 +158,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
                     .null_val => {},
                     else => {
                         const str = result.toString(allocator);
+                        defer allocator.free(str);
                         try writeAll(stdout, str);
                         try writeAll(stdout, "\n");
                     },
