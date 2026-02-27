@@ -74,7 +74,7 @@ test "vm: script locals stay fast and remain visible to functions" {
     var vm = Vm.init(allocator);
     _ = try vm.runProgram(stmts);
     try std.testing.expectEqualStrings("2\n", vm.output.items);
-    try std.testing.expect(vm.globals.contains("x"));
+    try std.testing.expect(vm.hasGlobal("x"));
 }
 
 test "vm: closures currently unsupported" {
@@ -116,6 +116,6 @@ test "vm: top-level vars are not exported when no function references them" {
     var vm = Vm.init(allocator);
     _ = try vm.runProgram(stmts);
     try std.testing.expectEqualStrings("3\n", vm.output.items);
-    try std.testing.expect(!vm.globals.contains("i"));
-    try std.testing.expect(!vm.globals.contains("sum"));
+    try std.testing.expect(!vm.hasGlobal("i"));
+    try std.testing.expect(!vm.hasGlobal("sum"));
 }

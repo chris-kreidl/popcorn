@@ -159,15 +159,17 @@ pub const Function = struct {
 
 pub const Compiler = struct {
     allocator: std.mem.Allocator,
+    vm: *Vm,
     global_names: std.StringHashMap(void),
     function_global_refs: std.StringHashMap(void),
     in_script: bool,
     lexical_depth: usize,
     runtime_scope_stack: std.ArrayList(bool),
 
-    pub fn init(allocator: std.mem.Allocator) Compiler {
+    pub fn init(allocator: std.mem.Allocator, vm: *Vm) Compiler {
         return .{
             .allocator = allocator,
+            .vm = vm,
             .global_names = std.StringHashMap(void).init(allocator),
             .function_global_refs = std.StringHashMap(void).init(allocator),
             .in_script = false,
@@ -462,9 +464,9 @@ pub const Compiler = struct {
                 }
             },
             .global => {
-                const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                const intern_id = try self.vm.internName(name);
                 try func.chunk.emitOp(self.allocator, .load_global);
-                _ = try func.chunk.emitU32(self.allocator, idx);
+                _ = try func.chunk.emitU32(self.allocator, intern_id);
             },
         }
     }
@@ -484,15 +486,15 @@ pub const Compiler = struct {
             try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
 
             if (should_export_global) {
-                const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                const intern_id = try self.vm.internName(name);
                 try func.chunk.emitOp(self.allocator, .define_global);
-                _ = try func.chunk.emitU32(self.allocator, idx);
+                _ = try func.chunk.emitU32(self.allocator, intern_id);
                 try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
             }
         } else {
-            const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+            const intern_id = try self.vm.internName(name);
             try func.chunk.emitOp(self.allocator, .define_global);
-            _ = try func.chunk.emitU32(self.allocator, idx);
+            _ = try func.chunk.emitU32(self.allocator, intern_id);
             try func.chunk.emitU8(self.allocator, if (is_const) 1 else 0);
         }
     }
@@ -517,15 +519,15 @@ pub const Compiler = struct {
                     try func.chunk.emitU16(self.allocator, r.slot);
                 }
                 if (should_export_global) {
-                    const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                    const intern_id = try self.vm.internName(name);
                     try func.chunk.emitOp(self.allocator, .set_global);
-                    _ = try func.chunk.emitU32(self.allocator, idx);
+                    _ = try func.chunk.emitU32(self.allocator, intern_id);
                 }
             },
             .global => {
-                const idx = try func.chunk.addConst(self.allocator, .{ .string = name });
+                const intern_id = try self.vm.internName(name);
                 try func.chunk.emitOp(self.allocator, .set_global);
-                _ = try func.chunk.emitU32(self.allocator, idx);
+                _ = try func.chunk.emitU32(self.allocator, intern_id);
             },
         }
     }
@@ -729,7 +731,9 @@ const LocalSlot = struct {
 
 pub const Vm = struct {
     allocator: std.mem.Allocator,
-    globals: std.StringHashMap(GlobalEntry),
+    globals: std.AutoHashMap(u32, GlobalEntry),
+    intern_map: std.StringHashMap(u32),
+    intern_strings: std.ArrayList([]const u8),
     stack: std.ArrayList(Value),
     frames: std.ArrayList(Frame),
     scope_stack: std.ArrayList(ScopeState),
@@ -739,7 +743,9 @@ pub const Vm = struct {
     pub fn init(allocator: std.mem.Allocator) Vm {
         return .{
             .allocator = allocator,
-            .globals = std.StringHashMap(GlobalEntry).init(allocator),
+            .globals = std.AutoHashMap(u32, GlobalEntry).init(allocator),
+            .intern_map = std.StringHashMap(u32).init(allocator),
+            .intern_strings = .empty,
             .stack = .empty,
             .frames = .empty,
             .scope_stack = .empty,
@@ -748,8 +754,21 @@ pub const Vm = struct {
         };
     }
 
+    fn internName(self: *Vm, name: []const u8) error{OutOfMemory}!u32 {
+        if (self.intern_map.get(name)) |id| return id;
+        const id: u32 = @intCast(self.intern_strings.items.len);
+        try self.intern_strings.append(self.allocator, name);
+        try self.intern_map.put(name, id);
+        return id;
+    }
+
+    pub fn hasGlobal(self: *const Vm, name: []const u8) bool {
+        const id = self.intern_map.get(name) orelse return false;
+        return self.globals.contains(id);
+    }
+
     pub fn runProgram(self: *Vm, stmts: []*Stmt) VmError!?Value {
-        var compiler = Compiler.init(self.allocator);
+        var compiler = Compiler.init(self.allocator, self);
         const script = compiler.compileProgram(stmts) catch |err| return err;
 
         try self.pushFrame(script, 0);
@@ -873,35 +892,20 @@ pub const Vm = struct {
                 .pop => _ = self.pop(),
 
                 .load_global => {
-                    const name_idx = try self.readU32(fr);
-                    const c = try constAt(fr, name_idx);
-                    const name = switch (c) {
-                        .string => |s| s,
-                        else => return error.RuntimeError,
-                    };
-                    const entry = self.globals.get(name) orelse return error.UndefinedVariable;
+                    const intern_id = try self.readU32(fr);
+                    const entry = self.globals.get(intern_id) orelse return error.UndefinedVariable;
                     self.push(entry.value);
                 },
                 .define_global => {
-                    const name_idx = try self.readU32(fr);
+                    const intern_id = try self.readU32(fr);
                     const is_const = (try self.readU8(fr)) != 0;
-                    const c = try constAt(fr, name_idx);
-                    const name = switch (c) {
-                        .string => |s| s,
-                        else => return error.RuntimeError,
-                    };
                     const v = self.pop();
-                    self.globals.put(name, .{ .value = v, .is_const = is_const }) catch return error.RuntimeError;
+                    self.globals.put(intern_id, .{ .value = v, .is_const = is_const }) catch return error.RuntimeError;
                 },
                 .set_global => {
-                    const name_idx = try self.readU32(fr);
-                    const c = try constAt(fr, name_idx);
-                    const name = switch (c) {
-                        .string => |s| s,
-                        else => return error.RuntimeError,
-                    };
+                    const intern_id = try self.readU32(fr);
                     const v = self.pop();
-                    const entry = self.globals.getPtr(name) orelse return error.UndefinedVariable;
+                    const entry = self.globals.getPtr(intern_id) orelse return error.UndefinedVariable;
                     if (entry.is_const) return error.ConstAssignment;
                     entry.value = v;
                 },
