@@ -770,13 +770,14 @@ pub const Vm = struct {
         try self.pushScope(func.local_slot_count);
     }
 
-    fn pop(self: *Vm) RuntimeError!Value {
-        if (self.stack.items.len == 0) return error.RuntimeError;
-        return self.stack.pop().?;
+    fn pop(self: *Vm) Value {
+        const val = self.stack.items[self.stack.items.len - 1];
+        self.stack.items.len -= 1;
+        return val;
     }
 
-    fn push(self: *Vm, v: Value) RuntimeError!void {
-        self.stack.append(self.allocator, v) catch return error.RuntimeError;
+    fn push(self: *Vm, v: Value) void {
+        self.stack.appendAssumeCapacity(v);
     }
 
     fn frame(self: *Vm) *Frame {
@@ -852,6 +853,8 @@ pub const Vm = struct {
     }
 
     fn execute(self: *Vm) RuntimeError!?Value {
+        self.stack.ensureTotalCapacity(self.allocator, 1024) catch return error.RuntimeError;
+
         while (self.frames.items.len > 0) {
             var fr = self.frame();
             const op_byte = try self.readU8(fr);
@@ -860,14 +863,14 @@ pub const Vm = struct {
             switch (op) {
                 .push_const => {
                     const idx = try self.readU32(fr);
-                    try self.push(try constAt(fr, idx));
+                    self.push(try constAt(fr, idx));
                 },
                 .dup => {
                     if (self.stack.items.len == 0) return error.RuntimeError;
                     const v = self.stack.items[self.stack.items.len - 1];
-                    try self.push(v);
+                    self.push(v);
                 },
-                .pop => _ = try self.pop(),
+                .pop => _ = self.pop(),
 
                 .load_global => {
                     const name_idx = try self.readU32(fr);
@@ -877,7 +880,7 @@ pub const Vm = struct {
                         else => return error.RuntimeError,
                     };
                     const entry = self.globals.get(name) orelse return error.UndefinedVariable;
-                    try self.push(entry.value);
+                    self.push(entry.value);
                 },
                 .define_global => {
                     const name_idx = try self.readU32(fr);
@@ -887,7 +890,7 @@ pub const Vm = struct {
                         .string => |s| s,
                         else => return error.RuntimeError,
                     };
-                    const v = try self.pop();
+                    const v = self.pop();
                     self.globals.put(name, .{ .value = v, .is_const = is_const }) catch return error.RuntimeError;
                 },
                 .set_global => {
@@ -897,7 +900,7 @@ pub const Vm = struct {
                         .string => |s| s,
                         else => return error.RuntimeError,
                     };
-                    const v = try self.pop();
+                    const v = self.pop();
                     const entry = self.globals.getPtr(name) orelse return error.UndefinedVariable;
                     if (entry.is_const) return error.ConstAssignment;
                     entry.value = v;
@@ -918,7 +921,7 @@ pub const Vm = struct {
                     const idx = scope.base + i;
                     const local = self.locals.items[idx];
                     if (!local.is_set) return error.UndefinedVariable;
-                    try self.push(local.value);
+                    self.push(local.value);
                 },
                 .define_local => {
                     const slot = try self.readU16(fr);
@@ -926,7 +929,7 @@ pub const Vm = struct {
                     const scope = try self.currentScope(fr);
                     const i: usize = @intCast(slot);
                     if (i >= scope.len) return error.RuntimeError;
-                    const v = try self.pop();
+                    const v = self.pop();
                     const idx = scope.base + i;
                     self.locals.items[idx] = .{ .value = v, .is_set = true, .is_const = is_const };
                 },
@@ -940,18 +943,18 @@ pub const Vm = struct {
                     const local = &self.locals.items[idx];
                     if (!local.is_set) return error.UndefinedVariable;
                     if (local.is_const) return error.ConstAssignment;
-                    const v = try self.pop();
+                    const v = self.pop();
                     local.value = v;
                 },
                 .load_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
-                    try self.push(self.locals.items[idx].value);
+                    self.push(self.locals.items[idx].value);
                 },
                 .set_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
-                    const v = try self.pop();
+                    const v = self.pop();
                     self.locals.items[idx].value = v;
                 },
 
@@ -1143,7 +1146,7 @@ pub const Vm = struct {
                 },
 
                 .print => {
-                    const v = try self.pop();
+                    const v = self.pop();
                     const s = v.toString(self.allocator);
                     self.output.appendSlice(self.allocator, s) catch return error.RuntimeError;
                     self.output.append(self.allocator, '\n') catch return error.RuntimeError;
@@ -1160,6 +1163,8 @@ pub const Vm = struct {
                     };
                     if (argc != fn_obj.arity) return error.ArityMismatch;
 
+                    // Ensure stack capacity for the called function's expressions
+                    self.stack.ensureUnusedCapacity(self.allocator, 256) catch return error.RuntimeError;
                     try self.pushFrame(fn_obj, callee_idx);
                     const new_fr = self.frame();
                     const locals_base = new_fr.locals_base;
@@ -1187,12 +1192,12 @@ pub const Vm = struct {
     }
 
     fn binArithAdd(self: *Vm) RuntimeError!void {
-        const right = try self.pop();
-        const left = try self.pop();
+        const right = self.pop();
+        const left = self.pop();
 
         if (left == .string and right == .string) {
             const out = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ left.string, right.string }) catch return error.RuntimeError;
-            try self.push(.{ .string = out });
+            self.push(.{ .string = out });
             return;
         }
 
@@ -1200,8 +1205,8 @@ pub const Vm = struct {
     }
 
     fn binArith(self: *Vm, op: ArithOp) RuntimeError!void {
-        const right = try self.pop();
-        const left = try self.pop();
+        const right = self.pop();
+        const left = self.pop();
         try self.binArithWithVals(left, right, op);
     }
 
@@ -1235,7 +1240,7 @@ pub const Vm = struct {
                             break :blk Value{ .int = @mod(lv, rv) };
                         },
                     };
-                    try self.push(out);
+                    self.push(out);
                 },
                 else => return error.TypeError,
             },
@@ -1254,7 +1259,7 @@ pub const Vm = struct {
                             break :blk Value{ .float = @mod(lv, rv) };
                         },
                     };
-                    try self.push(out);
+                    self.push(out);
                 },
                 else => return error.TypeError,
             },
@@ -1263,12 +1268,12 @@ pub const Vm = struct {
     }
 
     fn binCompare(self: *Vm, op: enum { eq, neq, lt, gt, le, ge }) RuntimeError!void {
-        const right = try self.pop();
-        const left = try self.pop();
+        const right = self.pop();
+        const left = self.pop();
 
         if (op == .eq or op == .neq) {
             const eq = valuesEqual(left, right);
-            try self.push(.{ .boolean = if (op == .eq) eq else !eq });
+            self.push(.{ .boolean = if (op == .eq) eq else !eq });
             return;
         }
 
@@ -1282,7 +1287,7 @@ pub const Vm = struct {
                         .ge => lv >= rv,
                         else => unreachable,
                     };
-                    try self.push(.{ .boolean = b });
+                    self.push(.{ .boolean = b });
                 },
                 else => return error.TypeError,
             },
@@ -1295,7 +1300,7 @@ pub const Vm = struct {
                         .ge => lv >= rv,
                         else => unreachable,
                     };
-                    try self.push(.{ .boolean = b });
+                    self.push(.{ .boolean = b });
                 },
                 else => return error.TypeError,
             },
