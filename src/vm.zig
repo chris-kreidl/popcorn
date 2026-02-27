@@ -957,33 +957,177 @@ pub const Vm = struct {
                     self.locals.items[idx].value = v;
                 },
 
-                .add => try self.binArithAdd(),
-                .sub => try self.binArith(.sub),
-                .mul => try self.binArith(.mul),
-                .div => try self.binArith(.div),
-                .mod => try self.binArith(.mod),
+                .add => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            const ov = @addWithOverflow(l.int, r.int);
+                            if (ov[1] != 0) return error.IntegerOverflow;
+                            self.stack.items[len - 2] = .{ .int = ov[0] };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binArithAdd();
+                },
+                .sub => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            const ov = @subWithOverflow(l.int, r.int);
+                            if (ov[1] != 0) return error.IntegerOverflow;
+                            self.stack.items[len - 2] = .{ .int = ov[0] };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binArith(.sub);
+                },
+                .mul => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            const ov = @mulWithOverflow(l.int, r.int);
+                            if (ov[1] != 0) return error.IntegerOverflow;
+                            self.stack.items[len - 2] = .{ .int = ov[0] };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binArith(.mul);
+                },
+                .div => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            if (r.int == 0) return error.DivisionByZero;
+                            if (l.int == std.math.minInt(i64) and r.int == -1) return error.IntegerOverflow;
+                            self.stack.items[len - 2] = .{ .int = @divTrunc(l.int, r.int) };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binArith(.div);
+                },
+                .mod => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            if (r.int == 0) return error.DivisionByZero;
+                            self.stack.items[len - 2] = .{ .int = @mod(l.int, r.int) };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binArith(.mod);
+                },
                 .neg => {
-                    const v = try self.pop();
-                    switch (v) {
-                        .int => |iv| try self.push(.{ .int = std.math.negate(iv) catch return error.IntegerOverflow }),
-                        .float => |fv| try self.push(.{ .float = -fv }),
+                    if (self.stack.items.len == 0) return error.RuntimeError;
+                    const v = &self.stack.items[self.stack.items.len - 1];
+                    switch (v.*) {
+                        .int => |iv| v.* = .{ .int = std.math.negate(iv) catch return error.IntegerOverflow },
+                        .float => |fv| v.* = .{ .float = -fv },
                         else => return error.TypeError,
                     }
                 },
                 .not => {
-                    const v = try self.pop();
-                    try self.push(.{ .boolean = !v.isTruthy() });
+                    if (self.stack.items.len == 0) return error.RuntimeError;
+                    const v = &self.stack.items[self.stack.items.len - 1];
+                    v.* = .{ .boolean = !v.isTruthy() };
                 },
                 .truthy => {
-                    const v = try self.pop();
-                    try self.push(.{ .boolean = v.isTruthy() });
+                    if (self.stack.items.len == 0) return error.RuntimeError;
+                    const v = &self.stack.items[self.stack.items.len - 1];
+                    v.* = .{ .boolean = v.isTruthy() };
                 },
-                .equal => try self.binCompare(.eq),
-                .not_equal => try self.binCompare(.neq),
-                .less => try self.binCompare(.lt),
-                .greater => try self.binCompare(.gt),
-                .less_equal => try self.binCompare(.le),
-                .greater_equal => try self.binCompare(.ge),
+                .equal => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int == r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.eq);
+                },
+                .not_equal => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int != r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.neq);
+                },
+                .less => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int < r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.lt);
+                },
+                .greater => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int > r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.gt);
+                },
+                .less_equal => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int <= r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.le);
+                },
+                .greater_equal => {
+                    const len = self.stack.items.len;
+                    if (len >= 2) {
+                        const l = self.stack.items[len - 2];
+                        const r = self.stack.items[len - 1];
+                        if (l == .int and r == .int) {
+                            self.stack.items[len - 2] = .{ .boolean = l.int >= r.int };
+                            self.stack.items.len = len - 1;
+                            continue;
+                        }
+                    }
+                    try self.binCompare(.ge);
+                },
 
                 .jump_if_false => {
                     const target = try self.readU32(fr);
