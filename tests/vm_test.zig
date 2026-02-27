@@ -119,3 +119,31 @@ test "vm: top-level vars are not exported when no function references them" {
     try std.testing.expect(!vm.hasGlobal("i"));
     try std.testing.expect(!vm.hasGlobal("sum"));
 }
+
+test "vm: deep expression grows stack safely beyond initial capacity" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const depth: usize = 1500;
+
+    var src = std.ArrayList(u8).empty;
+    defer src.deinit(allocator);
+
+    try src.appendSlice(allocator, "print(");
+    for (0..depth) |_| {
+        try src.appendSlice(allocator, "1 + (");
+    }
+    try src.appendSlice(allocator, "1");
+    for (0..depth) |_| {
+        try src.append(allocator, ')');
+    }
+    try src.appendSlice(allocator, ");");
+
+    const stmts = try parseAndResolve(allocator, src.items);
+    var vm = Vm.init(allocator);
+    _ = try vm.runProgram(stmts);
+
+    const expected = try std.fmt.allocPrint(allocator, "{d}\n", .{depth + 1});
+    try std.testing.expectEqualStrings(expected, vm.output.items);
+}

@@ -796,8 +796,8 @@ pub const Vm = struct {
         return val;
     }
 
-    fn push(self: *Vm, v: Value) void {
-        self.stack.appendAssumeCapacity(v);
+    fn push(self: *Vm, v: Value) RuntimeError!void {
+        self.stack.append(self.allocator, v) catch return error.RuntimeError;
     }
 
     fn frame(self: *Vm) *Frame {
@@ -883,19 +883,19 @@ pub const Vm = struct {
             switch (op) {
                 .push_const => {
                     const idx = try self.readU32(fr);
-                    self.push(try constAt(fr, idx));
+                    try self.push(try constAt(fr, idx));
                 },
                 .dup => {
                     if (self.stack.items.len == 0) return error.RuntimeError;
                     const v = self.stack.items[self.stack.items.len - 1];
-                    self.push(v);
+                    try self.push(v);
                 },
                 .pop => _ = try self.pop(),
 
                 .load_global => {
                     const intern_id = try self.readU32(fr);
                     const entry = self.globals.get(intern_id) orelse return error.UndefinedVariable;
-                    self.push(entry.value);
+                    try self.push(entry.value);
                 },
                 .define_global => {
                     const intern_id = try self.readU32(fr);
@@ -926,7 +926,7 @@ pub const Vm = struct {
                     const idx = scope.base + i;
                     const local = self.locals.items[idx];
                     if (!local.is_set) return error.UndefinedVariable;
-                    self.push(local.value);
+                    try self.push(local.value);
                 },
                 .define_local => {
                     const slot = try self.readU16(fr);
@@ -954,7 +954,7 @@ pub const Vm = struct {
                 .load_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
-                    self.push(self.locals.items[idx].value);
+                    try self.push(self.locals.items[idx].value);
                 },
                 .set_frame_local => {
                     const slot = try self.readU16(fr);
@@ -1202,7 +1202,7 @@ pub const Vm = struct {
 
         if (left == .string and right == .string) {
             const out = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ left.string, right.string }) catch return error.RuntimeError;
-            self.push(.{ .string = out });
+            try self.push(.{ .string = out });
             return;
         }
 
@@ -1245,7 +1245,7 @@ pub const Vm = struct {
                             break :blk Value{ .int = @mod(lv, rv) };
                         },
                     };
-                    self.push(out);
+                    try self.push(out);
                 },
                 else => return error.TypeError,
             },
@@ -1264,7 +1264,7 @@ pub const Vm = struct {
                             break :blk Value{ .float = @mod(lv, rv) };
                         },
                     };
-                    self.push(out);
+                    try self.push(out);
                 },
                 else => return error.TypeError,
             },
@@ -1278,7 +1278,7 @@ pub const Vm = struct {
 
         if (op == .eq or op == .neq) {
             const eq = valuesEqual(left, right);
-            self.push(.{ .boolean = if (op == .eq) eq else !eq });
+            try self.push(.{ .boolean = if (op == .eq) eq else !eq });
             return;
         }
 
@@ -1292,7 +1292,7 @@ pub const Vm = struct {
                         .ge => lv >= rv,
                         else => unreachable,
                     };
-                    self.push(.{ .boolean = b });
+                    try self.push(.{ .boolean = b });
                 },
                 else => return error.TypeError,
             },
@@ -1305,7 +1305,7 @@ pub const Vm = struct {
                         .ge => lv >= rv,
                         else => unreachable,
                     };
-                    self.push(.{ .boolean = b });
+                    try self.push(.{ .boolean = b });
                 },
                 else => return error.TypeError,
             },
