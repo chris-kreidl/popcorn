@@ -789,7 +789,8 @@ pub const Vm = struct {
         try self.pushScope(func.local_slot_count);
     }
 
-    fn pop(self: *Vm) Value {
+    fn pop(self: *Vm) RuntimeError!Value {
+        if (self.stack.items.len == 0) return error.RuntimeError;
         const val = self.stack.items[self.stack.items.len - 1];
         self.stack.items.len -= 1;
         return val;
@@ -889,7 +890,7 @@ pub const Vm = struct {
                     const v = self.stack.items[self.stack.items.len - 1];
                     self.push(v);
                 },
-                .pop => _ = self.pop(),
+                .pop => _ = try self.pop(),
 
                 .load_global => {
                     const intern_id = try self.readU32(fr);
@@ -899,12 +900,12 @@ pub const Vm = struct {
                 .define_global => {
                     const intern_id = try self.readU32(fr);
                     const is_const = (try self.readU8(fr)) != 0;
-                    const v = self.pop();
+                    const v = try self.pop();
                     self.globals.put(intern_id, .{ .value = v, .is_const = is_const }) catch return error.RuntimeError;
                 },
                 .set_global => {
                     const intern_id = try self.readU32(fr);
-                    const v = self.pop();
+                    const v = try self.pop();
                     const entry = self.globals.getPtr(intern_id) orelse return error.UndefinedVariable;
                     if (entry.is_const) return error.ConstAssignment;
                     entry.value = v;
@@ -933,7 +934,7 @@ pub const Vm = struct {
                     const scope = try self.currentScope(fr);
                     const i: usize = @intCast(slot);
                     if (i >= scope.len) return error.RuntimeError;
-                    const v = self.pop();
+                    const v = try self.pop();
                     const idx = scope.base + i;
                     self.locals.items[idx] = .{ .value = v, .is_set = true, .is_const = is_const };
                 },
@@ -947,7 +948,7 @@ pub const Vm = struct {
                     const local = &self.locals.items[idx];
                     if (!local.is_set) return error.UndefinedVariable;
                     if (local.is_const) return error.ConstAssignment;
-                    const v = self.pop();
+                    const v = try self.pop();
                     local.value = v;
                 },
                 .load_frame_local => {
@@ -958,7 +959,7 @@ pub const Vm = struct {
                 .set_frame_local => {
                     const slot = try self.readU16(fr);
                     const idx = fr.locals_base + @as(usize, slot);
-                    const v = self.pop();
+                    const v = try self.pop();
                     self.locals.items[idx].value = v;
                 },
 
@@ -1150,7 +1151,7 @@ pub const Vm = struct {
                 },
 
                 .print => {
-                    const v = self.pop();
+                    const v = try self.pop();
                     const s = v.toString(self.allocator);
                     self.output.appendSlice(self.allocator, s) catch return error.RuntimeError;
                     self.output.append(self.allocator, '\n') catch return error.RuntimeError;
@@ -1196,8 +1197,8 @@ pub const Vm = struct {
     }
 
     fn binArithAdd(self: *Vm) RuntimeError!void {
-        const right = self.pop();
-        const left = self.pop();
+        const right = try self.pop();
+        const left = try self.pop();
 
         if (left == .string and right == .string) {
             const out = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ left.string, right.string }) catch return error.RuntimeError;
@@ -1209,8 +1210,8 @@ pub const Vm = struct {
     }
 
     fn binArith(self: *Vm, op: ArithOp) RuntimeError!void {
-        const right = self.pop();
-        const left = self.pop();
+        const right = try self.pop();
+        const left = try self.pop();
         try self.binArithWithVals(left, right, op);
     }
 
@@ -1272,8 +1273,8 @@ pub const Vm = struct {
     }
 
     fn binCompare(self: *Vm, op: enum { eq, neq, lt, gt, le, ge }) RuntimeError!void {
-        const right = self.pop();
-        const left = self.pop();
+        const right = try self.pop();
+        const left = try self.pop();
 
         if (op == .eq or op == .neq) {
             const eq = valuesEqual(left, right);
@@ -1338,3 +1339,12 @@ pub const Vm = struct {
         };
     }
 };
+
+test "vm: pop on empty stack returns runtime error" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var vm = Vm.init(allocator);
+    try std.testing.expectError(error.RuntimeError, vm.pop());
+}
