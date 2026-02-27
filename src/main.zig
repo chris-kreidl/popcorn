@@ -116,9 +116,9 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
     if (vmEnabled(allocator)) {
         var vm = Vm.init(allocator);
         const vm_result = vm.runProgram(stmts) catch |err| switch (err) {
-            error.UnsupportedFeature => {
+            error.UnsupportedFeature => blk: {
                 try writeAll(stderr, "Warning: VM encountered unsupported feature; falling back to interpreter\n");
-                return null;
+                break :blk null;
             },
             error.TypeError => {
                 try printFmt(allocator, stderr, "Error: Type error\n", .{});
@@ -146,6 +146,10 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             },
             error.RuntimeError => {
                 try printFmt(allocator, stderr, "Error: Runtime error\n", .{});
+                return .language_error;
+            },
+            error.ReturnOutsideFunction => {
+                try printFmt(allocator, stderr, "Error: Return outside of function\n", .{});
                 return .language_error;
             },
             else => return err,

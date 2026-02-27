@@ -5,7 +5,7 @@ const Stmt = ast.Stmt;
 const ResolvedSlot = ast.ResolvedSlot;
 const TokenType = @import("token.zig").TokenType;
 
-pub const CompileError = error{ OutOfMemory, UnsupportedFeature };
+pub const CompileError = error{ OutOfMemory, UnsupportedFeature, ReturnOutsideFunction };
 pub const RuntimeError = error{
     RuntimeError,
     TypeError,
@@ -333,6 +333,7 @@ pub const Compiler = struct {
                 try self.emitDefineBinding(func, fn_decl.name, fn_decl.resolved_slot, true);
             },
             .return_stmt => |ret| {
+                if (self.in_script) return error.ReturnOutsideFunction;
                 if (ret.value) |value_expr| {
                     try self.compileExpr(func, value_expr);
                 } else {
