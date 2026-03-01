@@ -148,3 +148,26 @@ test "vm: deep expression grows stack safely beyond initial capacity" {
     const expected = try std.fmt.allocPrint(allocator, "{d}\n", .{depth + 1});
     try std.testing.expectEqualStrings(expected, vm.output.items);
 }
+
+test "vm: globals persist across runProgram calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var vm = Vm.init(allocator);
+    vm.setExportScriptGlobals(true);
+
+    const source1 =
+        \\var x: int = 41;
+    ;
+    const stmts1 = try parseAndResolve(allocator, source1);
+    _ = try vm.runProgram(stmts1);
+
+    const source2 =
+        \\x = x + 1;
+        \\print(x);
+    ;
+    const stmts2 = try parseAndResolve(allocator, source2);
+    _ = try vm.runProgram(stmts2);
+    try std.testing.expectEqualStrings("42\n", vm.output.items);
+}

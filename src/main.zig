@@ -49,7 +49,13 @@ fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     defer allocator.free(source);
 
     var interp = try Interpreter.init(allocator);
-    const status = try run(allocator, source, &interp, false);
+    var vm: ?Vm = null;
+    if (vmEnabled(allocator)) {
+        vm = Vm.init(allocator);
+        vm.?.setExportScriptGlobals(true);
+    }
+
+    const status = try run(allocator, source, &interp, if (vm) |*v| v else null, false);
     if (status == .language_error) {
         std.process.exit(1);
     }
@@ -63,6 +69,10 @@ fn runRepl(allocator: std.mem.Allocator) !void {
     try writeAll(stdout, "Type expressions or statements. Ctrl+D to exit.\n");
 
     var interp = try Interpreter.init(allocator);
+    var vm: ?Vm = null;
+    if (vmEnabled(allocator)) {
+        vm = Vm.init(allocator);
+    }
 
     while (true) {
         try writeAll(stdout, ">> ");
@@ -81,11 +91,11 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
         if (line.len == 0) continue;
 
-        _ = try run(allocator, line, &interp, true);
+        _ = try run(allocator, line, &interp, if (vm) |*v| v else null, true);
     }
 }
 
-fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) !RunStatus {
+fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, vm: ?*Vm, is_repl: bool) !RunStatus {
     const stderr = File.stderr();
     const stdout = File.stdout();
 
@@ -113,9 +123,8 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
         }
     };
 
-    if (vmEnabled(allocator)) {
-        var vm = Vm.init(allocator);
-        const vm_result = vm.runProgram(stmts) catch |err| switch (err) {
+    if (vm) |active_vm| {
+        const vm_result = active_vm.runProgram(stmts) catch |err| switch (err) {
             error.UnsupportedFeature => blk: {
                 try writeAll(stderr, "Warning: VM encountered unsupported feature; falling back to interpreter\n");
                 break :blk null;
@@ -156,8 +165,9 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
         };
 
         if (vm_result) |result| {
-            if (vm.output.items.len > 0) {
-                try writeAll(stdout, vm.output.items);
+            if (active_vm.output.items.len > 0) {
+                try writeAll(stdout, active_vm.output.items);
+                active_vm.output.clearRetainingCapacity();
             }
 
             if (is_repl) {

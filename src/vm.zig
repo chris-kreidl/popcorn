@@ -489,7 +489,7 @@ pub const Compiler = struct {
         if (resolved_slot) |slot| {
             const should_export_global = self.in_script and
                 self.lexical_depth == 0 and
-                self.function_global_refs.contains(name);
+                (self.vm.export_script_globals or self.function_global_refs.contains(name));
             if (should_export_global) {
                 // Keep script-level vars/functions fast as slots, and also publish
                 // function-referenced names to globals for mixed lookup patterns.
@@ -519,7 +519,7 @@ pub const Compiler = struct {
                 const current_depth: u16 = @intCast(self.lexical_depth);
                 const should_export_global = self.in_script and
                     r.depth == current_depth and
-                    self.function_global_refs.contains(name);
+                    (self.vm.export_script_globals or self.function_global_refs.contains(name));
                 if (should_export_global) {
                     try func.chunk.emitOp(self.allocator, .dup);
                 }
@@ -744,6 +744,7 @@ const Frame = struct {
 
 pub const Vm = struct {
     allocator: std.mem.Allocator,
+    export_script_globals: bool,
     globals: std.AutoHashMap(u32, GlobalEntry),
     intern_map: std.StringHashMap(u32),
     intern_strings: std.ArrayList([]const u8),
@@ -755,6 +756,7 @@ pub const Vm = struct {
     pub fn init(allocator: std.mem.Allocator) Vm {
         return .{
             .allocator = allocator,
+            .export_script_globals = false,
             .globals = std.AutoHashMap(u32, GlobalEntry).init(allocator),
             .intern_map = std.StringHashMap(u32).init(allocator),
             .intern_strings = .empty,
@@ -763,6 +765,10 @@ pub const Vm = struct {
             .scope_stack = .empty,
             .output = .empty,
         };
+    }
+
+    pub fn setExportScriptGlobals(self: *Vm, enabled: bool) void {
+        self.export_script_globals = enabled;
     }
 
     fn internName(self: *Vm, name: []const u8) error{OutOfMemory}!u32 {
@@ -779,6 +785,13 @@ pub const Vm = struct {
     }
 
     pub fn runProgram(self: *Vm, stmts: []*Stmt) VmError!?Value {
+        // Preserve globals/interned names across runs, but reset transient
+        // execution state so a reused VM (e.g. REPL) starts clean each eval.
+        self.stack.items.len = 0;
+        self.frames.items.len = 0;
+        self.scope_stack.items.len = 0;
+        self.output.clearRetainingCapacity();
+
         var compiler = Compiler.init(self.allocator, self);
         const script = compiler.compileProgram(stmts) catch |err| return err;
 
