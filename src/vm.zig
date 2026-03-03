@@ -42,15 +42,15 @@ pub const Value = union(enum) {
 
     // Returns an allocator-owned string representation. Caller owns the memory
     // and must free it with the same allocator.
-    pub fn toString(self: Value, allocator: std.mem.Allocator) []const u8 {
+    pub fn toString(self: Value, allocator: std.mem.Allocator) ![]const u8 {
         return switch (self) {
-            .int => |v| std.fmt.allocPrint(allocator, "{d}", .{v}) catch @panic("OOM"),
-            .float => |v| std.fmt.allocPrint(allocator, "{d}", .{v}) catch @panic("OOM"),
-            .string => |v| allocator.dupe(u8, v) catch @panic("OOM"),
-            .boolean => |v| std.fmt.allocPrint(allocator, "{s}", .{if (v) "true" else "false"}) catch @panic("OOM"),
-            .null_val => std.fmt.allocPrint(allocator, "null", .{}) catch @panic("OOM"),
-            .function_proto => |f| std.fmt.allocPrint(allocator, "<fn {s}>", .{f.name}) catch @panic("OOM"),
-            .closure => |c| std.fmt.allocPrint(allocator, "<fn {s}>", .{c.func.name}) catch @panic("OOM"),
+            .int => |v| try std.fmt.allocPrint(allocator, "{d}", .{v}),
+            .float => |v| try std.fmt.allocPrint(allocator, "{d}", .{v}),
+            .string => |v| try allocator.dupe(u8, v),
+            .boolean => |v| try std.fmt.allocPrint(allocator, "{s}", .{if (v) "true" else "false"}),
+            .null_val => try std.fmt.allocPrint(allocator, "null", .{}),
+            .function_proto => |f| try std.fmt.allocPrint(allocator, "<fn {s}>", .{f.name}),
+            .closure => |c| try std.fmt.allocPrint(allocator, "<fn {s}>", .{c.func.name}),
         };
     }
 };
@@ -1189,7 +1189,7 @@ pub const Vm = struct {
 
                 .print => {
                     const v = try self.pop();
-                    const s = v.toString(self.allocator);
+                    const s = v.toString(self.allocator) catch return error.RuntimeError;
                     defer self.allocator.free(s);
                     self.output.appendSlice(self.allocator, s) catch return error.RuntimeError;
                     self.output.append(self.allocator, '\n') catch return error.RuntimeError;

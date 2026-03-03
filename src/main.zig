@@ -174,7 +174,7 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, v
                 switch (result) {
                     .null_val => {},
                     else => {
-                        const str = result.toString(allocator);
+                        const str = try result.toString(allocator);
                         defer allocator.free(str);
                         try writeAll(stdout, str);
                         try writeAll(stdout, "\n");
