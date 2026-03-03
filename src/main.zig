@@ -41,6 +41,13 @@ fn vmEnabled(allocator: std.mem.Allocator) bool {
     return value.len > 0 and !std.mem.eql(u8, value, "0");
 }
 
+fn initVm(allocator: std.mem.Allocator) ?Vm {
+    if (!vmEnabled(allocator)) return null;
+    var vm = Vm.init(allocator);
+    vm.setExportScriptGlobals(true);
+    return vm;
+}
+
 fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| {
         printFmt(allocator, File.stderr(), "Error: Could not read file '{s}': {}\n", .{ path, err }) catch {};
@@ -49,11 +56,7 @@ fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     defer allocator.free(source);
 
     var interp = try Interpreter.init(allocator);
-    var vm: ?Vm = null;
-    if (vmEnabled(allocator)) {
-        vm = Vm.init(allocator);
-        vm.?.setExportScriptGlobals(true);
-    }
+    var vm = initVm(allocator);
 
     const status = try run(allocator, source, &interp, if (vm) |*v| v else null, false);
     if (status == .language_error) {
@@ -69,11 +72,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
     try writeAll(stdout, "Type expressions or statements. Ctrl+D to exit.\n");
 
     var interp = try Interpreter.init(allocator);
-    var vm: ?Vm = null;
-    if (vmEnabled(allocator)) {
-        vm = Vm.init(allocator);
-        vm.?.setExportScriptGlobals(true);
-    }
+    var vm = initVm(allocator);
 
     while (true) {
         try writeAll(stdout, ">> ");

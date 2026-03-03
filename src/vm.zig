@@ -177,6 +177,7 @@ pub const Compiler = struct {
     in_script: bool,
     lexical_depth: usize,
     runtime_scope_stack: std.ArrayList(bool),
+    materialized_scope_depth: usize,
 
     pub fn init(allocator: std.mem.Allocator, vm: *Vm) Compiler {
         return .{
@@ -187,6 +188,7 @@ pub const Compiler = struct {
             .in_script = false,
             .lexical_depth = 0,
             .runtime_scope_stack = .empty,
+            .materialized_scope_depth = 0,
         };
     }
 
@@ -349,10 +351,12 @@ pub const Compiler = struct {
         const saved_in_script = self.in_script;
         const saved_depth = self.lexical_depth;
         const saved_runtime_scope_stack = self.runtime_scope_stack;
+        const saved_materialized_scope_depth = self.materialized_scope_depth;
         self.runtime_scope_stack = .empty;
         defer {
             self.runtime_scope_stack.deinit(self.allocator);
             self.runtime_scope_stack = saved_runtime_scope_stack;
+            self.materialized_scope_depth = saved_materialized_scope_depth;
             self.in_script = saved_in_script;
             self.lexical_depth = saved_depth;
         }
@@ -587,26 +591,27 @@ pub const Compiler = struct {
     fn resetScopeTracking(self: *Compiler) CompileError!void {
         self.runtime_scope_stack.clearRetainingCapacity();
         try self.runtime_scope_stack.append(self.allocator, true);
+        self.materialized_scope_depth = 0;
     }
 
     fn enterLexicalScope(self: *Compiler, materialized: bool) CompileError!void {
         self.lexical_depth += 1;
+        if (materialized) self.materialized_scope_depth += 1;
         try self.runtime_scope_stack.append(self.allocator, materialized);
     }
 
     fn exitLexicalScope(self: *Compiler) void {
         self.lexical_depth -= 1;
-        _ = self.runtime_scope_stack.pop();
+        if (self.runtime_scope_stack.pop()) |materialized| {
+            if (materialized) self.materialized_scope_depth -= 1;
+        }
     }
 
     // Returns true when no materialized block scopes are currently active above
     // the frame root, meaning the current runtime scope IS the frame root scope.
     // Only in this case is it safe to use load_frame_local / set_frame_local.
     fn isAtFrameRoot(self: *Compiler) bool {
-        for (self.runtime_scope_stack.items[1..]) |materialized| {
-            if (materialized) return false;
-        }
-        return true;
+        return self.materialized_scope_depth == 0;
     }
 
     fn runtimeDepthForResolved(self: *Compiler, resolved: ResolvedSlot) CompileError!u16 {
