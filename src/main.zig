@@ -72,6 +72,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
     var vm: ?Vm = null;
     if (vmEnabled(allocator)) {
         vm = Vm.init(allocator);
+        vm.?.setExportScriptGlobals(true);
     }
 
     while (true) {
