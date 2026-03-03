@@ -465,7 +465,7 @@ pub const Compiler = struct {
     }
 
     fn emitLoadBinding(self: *Compiler, func: *Function, name: []const u8, resolved: ?ResolvedSlot) CompileError!void {
-        switch (try self.classifyBinding(name, resolved)) {
+        switch (try self.classifyBinding(resolved)) {
             .local => |r| {
                 const runtime_depth = try self.runtimeDepthForResolved(r);
                 if (runtime_depth == 0) {
@@ -514,7 +514,7 @@ pub const Compiler = struct {
     }
 
     fn emitSetBinding(self: *Compiler, func: *Function, name: []const u8, resolved: ?ResolvedSlot) CompileError!void {
-        switch (try self.classifyBinding(name, resolved)) {
+        switch (try self.classifyBinding(resolved)) {
             .local => |r| {
                 const current_depth: u16 = @intCast(self.lexical_depth);
                 const should_export_global = self.in_script and
@@ -551,14 +551,13 @@ pub const Compiler = struct {
         global,
     };
 
-    fn classifyBinding(self: *Compiler, name: []const u8, resolved: ?ResolvedSlot) CompileError!Binding {
+    fn classifyBinding(self: *Compiler, resolved: ?ResolvedSlot) CompileError!Binding {
         if (resolved) |r| {
             const current_depth: u16 = @intCast(self.lexical_depth);
             if (self.in_script) {
                 if (r.depth <= current_depth) return .{ .local = r };
                 return error.UnsupportedFeature;
             }
-            _ = name;
             return .{ .local = r };
         }
         return .global;
