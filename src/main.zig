@@ -3,6 +3,7 @@ const Parser = @import("parser.zig").Parser;
 const Resolver = @import("resolver.zig").Resolver;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const Value = @import("interpreter.zig").Value;
+const Vm = @import("vm.zig").Vm;
 const File = std.fs.File;
 const RunStatus = enum { ok, language_error };
 
@@ -34,6 +35,19 @@ fn printFmt(allocator: std.mem.Allocator, file: File, comptime fmt: []const u8, 
     try writeAll(file, msg);
 }
 
+fn vmEnabled(allocator: std.mem.Allocator) bool {
+    const value = std.process.getEnvVarOwned(allocator, "POPCORN_VM") catch return false;
+    defer allocator.free(value);
+    return value.len > 0 and !std.mem.eql(u8, value, "0");
+}
+
+fn initVm(allocator: std.mem.Allocator) ?Vm {
+    if (!vmEnabled(allocator)) return null;
+    var vm = Vm.init(allocator);
+    vm.setExportScriptGlobals(true);
+    return vm;
+}
+
 fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| {
         printFmt(allocator, File.stderr(), "Error: Could not read file '{s}': {}\n", .{ path, err }) catch {};
@@ -42,7 +56,9 @@ fn runFile(allocator: std.mem.Allocator, path: []const u8) !void {
     defer allocator.free(source);
 
     var interp = try Interpreter.init(allocator);
-    const status = try run(allocator, source, &interp, false);
+    var vm = initVm(allocator);
+
+    const status = try run(allocator, source, &interp, if (vm) |*v| v else null, false);
     if (status == .language_error) {
         std.process.exit(1);
     }
@@ -56,6 +72,7 @@ fn runRepl(allocator: std.mem.Allocator) !void {
     try writeAll(stdout, "Type expressions or statements. Ctrl+D to exit.\n");
 
     var interp = try Interpreter.init(allocator);
+    var vm = initVm(allocator);
 
     while (true) {
         try writeAll(stdout, ">> ");
@@ -74,11 +91,11 @@ fn runRepl(allocator: std.mem.Allocator) !void {
 
         if (line.len == 0) continue;
 
-        _ = try run(allocator, line, &interp, true);
+        _ = try run(allocator, line, &interp, if (vm) |*v| v else null, true);
     }
 }
 
-fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, is_repl: bool) !RunStatus {
+fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, vm: ?*Vm, is_repl: bool) !RunStatus {
     const stderr = File.stderr();
     const stdout = File.stdout();
 
@@ -105,6 +122,68 @@ fn run(allocator: std.mem.Allocator, source: []const u8, interp: *Interpreter, i
             else => return err,
         }
     };
+
+    if (vm) |active_vm| {
+        const vm_result = active_vm.runProgram(stmts) catch |err| switch (err) {
+            error.UnsupportedFeature => blk: {
+                try writeAll(stderr, "Warning: VM encountered unsupported feature; falling back to interpreter\n");
+                break :blk null;
+            },
+            error.TypeError => {
+                try printFmt(allocator, stderr, "Error: Type error\n", .{});
+                return .language_error;
+            },
+            error.UndefinedVariable => {
+                try printFmt(allocator, stderr, "Error: Undefined variable\n", .{});
+                return .language_error;
+            },
+            error.ConstAssignment => {
+                try printFmt(allocator, stderr, "Error: Cannot assign to const variable\n", .{});
+                return .language_error;
+            },
+            error.DivisionByZero => {
+                try printFmt(allocator, stderr, "Error: Division by zero\n", .{});
+                return .language_error;
+            },
+            error.IntegerOverflow => {
+                try printFmt(allocator, stderr, "Error: Integer overflow\n", .{});
+                return .language_error;
+            },
+            error.ArityMismatch => {
+                try printFmt(allocator, stderr, "Error: Wrong number of arguments\n", .{});
+                return .language_error;
+            },
+            error.RuntimeError => {
+                try printFmt(allocator, stderr, "Error: Runtime error\n", .{});
+                return .language_error;
+            },
+            error.ReturnOutsideFunction => {
+                try printFmt(allocator, stderr, "Error: Return outside of function\n", .{});
+                return .language_error;
+            },
+            else => return err,
+        };
+
+        if (vm_result) |result| {
+            if (active_vm.output.items.len > 0) {
+                try writeAll(stdout, active_vm.output.items);
+                active_vm.output.clearRetainingCapacity();
+            }
+
+            if (is_repl) {
+                switch (result) {
+                    .null_val => {},
+                    else => {
+                        const str = try result.toString(allocator);
+                        defer allocator.free(str);
+                        try writeAll(stdout, str);
+                        try writeAll(stdout, "\n");
+                    },
+                }
+            }
+            return .ok;
+        }
+    }
 
     const result = interp.interpret(stmts) catch |err| {
         const msg: []const u8 = switch (err) {
