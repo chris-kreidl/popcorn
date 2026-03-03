@@ -1184,11 +1184,13 @@ pub const Vm = struct {
 
                 .jump_if_false => {
                     const target = try self.readU32(fr);
+                    if (self.stack.items.len == 0) return error.RuntimeError;
                     const cond = self.stack.items[self.stack.items.len - 1];
                     if (!cond.isTruthy()) fr.ip = @intCast(target);
                 },
                 .jump_if_true => {
                     const target = try self.readU32(fr);
+                    if (self.stack.items.len == 0) return error.RuntimeError;
                     const cond = self.stack.items[self.stack.items.len - 1];
                     if (cond.isTruthy()) fr.ip = @intCast(target);
                 },
