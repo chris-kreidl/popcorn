@@ -468,7 +468,7 @@ pub const Compiler = struct {
         switch (try self.classifyBinding(resolved)) {
             .local => |r| {
                 const runtime_depth = try self.runtimeDepthForResolved(r);
-                if (runtime_depth == 0) {
+                if (runtime_depth == 0 and self.isAtFrameRoot()) {
                     try func.chunk.emitOp(self.allocator, .load_frame_local);
                     try func.chunk.emitU16(self.allocator, r.slot);
                 } else {
@@ -524,7 +524,7 @@ pub const Compiler = struct {
                     try func.chunk.emitOp(self.allocator, .dup);
                 }
                 const runtime_depth = try self.runtimeDepthForResolved(r);
-                if (runtime_depth == 0) {
+                if (runtime_depth == 0 and self.isAtFrameRoot()) {
                     try func.chunk.emitOp(self.allocator, .set_frame_local);
                     try func.chunk.emitU16(self.allocator, r.slot);
                 } else {
@@ -597,6 +597,16 @@ pub const Compiler = struct {
     fn exitLexicalScope(self: *Compiler) void {
         self.lexical_depth -= 1;
         _ = self.runtime_scope_stack.pop();
+    }
+
+    // Returns true when no materialized block scopes are currently active above
+    // the frame root, meaning the current runtime scope IS the frame root scope.
+    // Only in this case is it safe to use load_frame_local / set_frame_local.
+    fn isAtFrameRoot(self: *Compiler) bool {
+        for (self.runtime_scope_stack.items[1..]) |materialized| {
+            if (materialized) return false;
+        }
+        return true;
     }
 
     fn runtimeDepthForResolved(self: *Compiler, resolved: ResolvedSlot) CompileError!u16 {
